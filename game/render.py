@@ -24,27 +24,50 @@ BRAIN_NOTES = {
 
 
 def scale(color, k):
+    """Darken or brighten an RGB colour.
+
+    Args:
+        color: RGB(A) colour; only the RGB part is used.
+        k: brightness factor (0.5 = half as bright); results are clamped to 0..255.
+    """
     return tuple(max(0, min(255, int(v * k))) for v in color[:3])
 
 
 def mix(a, b, t):
+    """Blend two RGB colours.
+
+    Args:
+        a: colour at t = 0.
+        b: colour at t = 1.
+        t: blend amount 0..1.
+    """
     return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
 def accuracy_color(acc):
-    """Low readability is good for the player (green), high is bad (red)."""
+    """Low readability is good for the player (green), high is bad (red).
+
+    Args:
+        acc: the model's prediction accuracy 0..1.
+    """
     if acc < 0.5:
         return mix(C.GOOD, C.WARN, acc / 0.5)
     return mix(C.WARN, C.HUNTER, min(1.0, (acc - 0.5) / 0.3))
 
 
 def fmt_time(seconds):
+    """Format a number of `seconds` as M:SS for the HUD."""
     s = int(seconds)
     return f"{s // 60}:{s % 60:02d}"
 
 
 class Renderer:
     def __init__(self, screen):
+        """Create the renderer and build its cached images.
+
+        Args:
+            screen: the pygame surface to draw on (real resolution = logical x gfx.SCALE).
+        """
         self.screen = screen
         self.fonts = {}
         self.text_cache = {}
@@ -72,7 +95,11 @@ class Renderer:
         self.low_quality = False   # set by the app on slow devices
 
     def set_screen(self, screen):
-        """Switch to a new screen surface (resolution change): rebuild every cached image."""
+        """Switch to a new screen surface (resolution change): rebuild every cached image.
+
+        Args:
+            screen: the new pygame surface to draw on.
+        """
         self.screen = screen
         self.fonts.clear()
         self.text_cache.clear()
@@ -86,12 +113,21 @@ class Renderer:
 
     # ================================================================ basics
     def font(self, size):
+        """Default font at `size` logical pixels (cached, created at real resolution)."""
         f = self.fonts.get(size)
         if f is None:
             f = self.fonts[size] = pygame.font.Font(None, max(1, round(size * gfx.SCALE)))
         return f
 
     def text_surface(self, text, size, color, spacing=0):
+        """Render text to a surface at real resolution (cached).
+
+        Args:
+            text: the string to render.
+            size: font size in logical pixels.
+            color: RGB colour.
+            spacing: extra letter spacing in logical pixels (0 = normal).
+        """
         key = (text, size, color, spacing)
         surf = self.text_cache.get(key)
         if surf is None:
@@ -114,11 +150,31 @@ class Renderer:
         return surf
 
     def text_size(self, text, size, color=(255, 255, 255), spacing=0):
-        """Size of a text label in logical pixels."""
+        """Size of a text label in logical pixels.
+
+        Args:
+            text: the string to measure.
+            size: font size in logical pixels.
+            color: colour (only part of the cache key).
+            spacing: extra letter spacing in logical pixels.
+        """
         return gfx.logical_size(self.text_surface(text, size, color, spacing))
 
     def blit_text(self, text, size, color, pos, anchor="topleft", spacing=0, target=None):
-        """Draw text; `pos`/`anchor` and the returned rect are in logical pixels."""
+        """Draw text; `pos`/`anchor` and the returned rect are in logical pixels.
+
+        Args:
+            text: the string to draw.
+            size: font size in logical pixels.
+            color: RGB colour.
+            pos: (x, y) point the anchor is placed at.
+            anchor: which point of the text sits at `pos`, e.g. "topleft" or "center".
+            spacing: extra letter spacing in logical pixels.
+            target: surface to draw on; None means the screen.
+
+        Returns:
+            The text's rect in logical pixels (for placing things next to it).
+        """
         surf = self.text_surface(text, size, color, spacing)
         rect = surf.get_rect(**{anchor: (round(pos[0] * gfx.SCALE), round(pos[1] * gfx.SCALE))})
         (target or self.screen).blit(surf, rect)
@@ -126,6 +182,17 @@ class Renderer:
         return pygame.Rect(round(rect.x / k), round(rect.y / k), round(rect.w / k), round(rect.h / k))
 
     def wrap(self, text, size, width, spacing=0):
+        """Split `text` into lines that fit a width.
+
+        Args:
+            text: the text to wrap.
+            size: font size in logical pixels.
+            width: maximum line width in logical pixels.
+            spacing: extra letter spacing in logical pixels.
+
+        Returns:
+            List of lines.
+        """
         words, lines, line = text.split(), [], ""
         for w in words:
             trial = (line + " " + w).strip()
@@ -139,7 +206,13 @@ class Renderer:
         return lines
 
     def glow(self, radius, color, strength):
-        """A soft radial light (built in real pixels and cached)."""
+        """A soft radial light (built in real pixels and cached).
+
+        Args:
+            radius: glow radius in logical pixels.
+            color: RGB colour at the centre.
+            strength: brightness 0..1 (rounded to 0.1 so the cache stays small).
+        """
         rp = max(2, round(radius * gfx.SCALE))
         strength = round(strength, 1)
         key = (rp, color, strength)
@@ -156,12 +229,28 @@ class Renderer:
         return surf
 
     def draw_glow(self, x, y, radius, color, strength=0.6, target=None):
+        """Add a glow centred on (x, y) using additive blending.
+
+        Args:
+            x, y: centre in logical pixels.
+            radius: glow radius in logical pixels.
+            color: RGB colour.
+            strength: brightness 0..1.
+            target: surface to draw on; None means the screen.
+        """
         surf = self.glow(radius, color, strength)
         r = surf.get_width() // 2
         (target or self.screen).blit(surf, (round(x * gfx.SCALE) - r, round(y * gfx.SCALE) - r),
                                      special_flags=pygame.BLEND_RGB_ADD)
 
     def card(self, rect, title=None, accent=None):
+        """Draw a rounded panel like the side cards.
+
+        Args:
+            rect: (x, y, w, h) in logical pixels.
+            title: optional small heading in the top-left corner.
+            accent: optional colour for the short accent mark at the top.
+        """
         gfx.rect(self.screen, C.CARD_BG, rect, border_radius=14)
         gfx.rect(self.screen, C.CARD_EDGE, rect, width=1, border_radius=14)
         if accent:
@@ -170,6 +259,17 @@ class Renderer:
             self.blit_text(title, 17, C.MUTED, (rect[0] + 16, rect[1] + 14), spacing=2)
 
     def pill(self, x, y, text, color, target=None):
+        """Draw a small rounded label such as "AI VISION" or "SHIELD".
+
+        Args:
+            x, y: top-left in logical pixels.
+            text: the label text.
+            color: colour of the text and border.
+            target: surface to draw on; None means the screen.
+
+        Returns:
+            The pill's width in logical pixels (to place the next one).
+        """
         surf = self.text_surface(text, 17, color, 1)
         tw, th = gfx.logical_size(surf)
         w, h = tw + 20, 24
@@ -180,6 +280,14 @@ class Renderer:
         return w
 
     def arrow(self, center, direction, size, color):
+        """Draw an arrow (used for the mind-model bars and the D-pad).
+
+        Args:
+            center: (x, y) centre in logical pixels.
+            direction: "U", "R", "D" or "L".
+            size: half-length of the arrow in logical pixels.
+            color: RGB colour.
+        """
         x, y = center
         dx, dy = C.DIRS[direction]
         px, py = -dy, dx
@@ -192,6 +300,15 @@ class Renderer:
         gfx.line(self.screen, color, base, tail_end, max(2, int(size * 0.45)))
 
     def power_icon(self, x, y, kind, color, target=None, r=8):
+        """Draw the icon of a power-up.
+
+        Args:
+            x, y: centre in logical pixels.
+            kind: "freeze", "decoy" or "shield".
+            color: RGB colour.
+            target: surface to draw on; None means the screen.
+            r: icon radius in logical pixels.
+        """
         tgt = target or self.screen
         if kind == "freeze":
             for k in range(3):
@@ -207,7 +324,13 @@ class Renderer:
             gfx.polygon(tgt, color, pts, 2)
 
     def tint(self, rect, rgba, radius=0):
-        """Draw a translucent (optionally rounded) rectangle, cached so it costs one blit."""
+        """Draw a translucent (optionally rounded) rectangle, cached so it costs one blit.
+
+        Args:
+            rect: (x, y, w, h) in logical pixels.
+            rgba: colour with alpha (opacity) 0..255.
+            radius: corner radius in logical pixels (0 = square).
+        """
         x, y, w, h = rect
         rgba = (*rgba[:3], max(0, min(255, int(rgba[3]) // 8 * 8)))   # few cache entries
         key = (round(w), round(h), rgba, radius)
@@ -225,6 +348,7 @@ class Renderer:
 
     # ============================================================== backdrop
     def _make_backdrop(self):
+        """Build the dark background with its dot grid (drawn once, reused every frame)."""
         surf = gfx.surface((C.WIDTH, C.HEIGHT))
         surf.fill(C.BG)
         for x in range(0, C.WIDTH, 40):
@@ -244,6 +368,12 @@ class Renderer:
         return surf
 
     def draw_stars(self, dt, speed=1.0):
+        """Draw the slowly rising background lights.
+
+        Args:
+            dt: seconds since the last frame.
+            speed: drift speed multiplier (1 = normal).
+        """
         for s in self.stars:
             s[1] -= s[2] * dt * speed
             if s[1] < -20:
@@ -256,6 +386,11 @@ class Renderer:
 
     # ================================================================= arena
     def _build_arena(self, arena):
+        """Draw the arena floor, grid dots and neon walls into one cached surface.
+
+        Args:
+            arena: the Arena whose walls are drawn; neighbouring walls are joined.
+        """
         surf = gfx.surface((C.ARENA_W, C.ARENA_H))
         surf.fill(C.BG)
         gfx.rect(surf, C.ARENA_BG, (0, 0, C.ARENA_W, C.ARENA_H), border_radius=16)
@@ -281,14 +416,22 @@ class Renderer:
         return surf
 
     def px(self, cell):
+        """Screen position (logical pixels) of the centre of `cell`, including screen shake."""
         return (C.ARENA_X + self.ox + (cell[0] + 0.5) * C.CELL,
                 C.ARENA_Y + self.oy + (cell[1] + 0.5) * C.CELL)
 
     def local(self, cell):
+        """Position of the centre of `cell` inside the arena surface (logical pixels)."""
         return ((cell[0] + 0.5) * C.CELL, (cell[1] + 0.5) * C.CELL)
 
     # ============================================================ world events
     def on_events(self, events, world):
+        """Turn this frame's world events into particles, floating text, flashes and bubbles.
+
+        Args:
+            events: list of event tuples from World.pop_events(), e.g. ("orb", cell, points, combo).
+            world: the World being drawn.
+        """
         fx = self.effects
         for ev in events:
             kind = ev[0]
@@ -344,6 +487,15 @@ class Renderer:
 
     # ============================================================ game screen
     def draw_game(self, world, dt, best, muted, show_hud=True):
+        """Draw one gameplay frame: arena, AI Vision, orbs, hunters, player, effects and HUD.
+
+        Args:
+            world: the World being drawn.
+            dt: seconds since the last frame (animations).
+            best: best score so far, shown in the HUD.
+            muted: whether sound is off (for the SOUND button label).
+            show_hud: False to draw only the arena (used under the game-over card).
+        """
         self.t += dt
         self.buttons = []
         self.effects.update(dt)
@@ -403,6 +555,11 @@ class Renderer:
             self._draw_panel(world)
 
     def _draw_vision(self, world):
+        """AI Vision overlay: each hunter's planned path, target and the Mind Reader's forecast.
+
+        Args:
+            world: the World being drawn.
+        """
         ov = self.overlay
         for h in world.hunters:
             col = h.color
@@ -427,6 +584,11 @@ class Renderer:
                 gfx.line(ov, (*col, 220), (x, y + r - 5), (x, y + r + 5), 2)
 
     def _draw_orb(self, orb):
+        """Draw the orb with its pulsing glow and spawn animation.
+
+        Args:
+            orb: the Orb to draw.
+        """
         x, y = self.px(orb.cell)
         grow = min(1.0, orb.age / 0.25)
         pulse = 0.5 + 0.5 * math.sin(self.t * 5)
@@ -437,6 +599,11 @@ class Renderer:
             gfx.circle(self.screen, (245, 255, 225), (x - 2, y - 2), 2.5 * grow)
 
     def _draw_powerup(self, pu):
+        """Draw a power-up, blinking when it is about to expire.
+
+        Args:
+            pu: the PowerUp to draw.
+        """
         remaining = pu.life - pu.age
         if remaining < 2.0 and int(self.t * 8) % 2 == 0:
             return
@@ -451,6 +618,11 @@ class Renderer:
             self.power_icon(x, y, pu.kind, col)
 
     def _draw_player(self, world):
+        """Draw the player with its trail, shield ring and glow.
+
+        Args:
+            world: the World being drawn.
+        """
         p = world.player
         x, y = self.px(p.visual_cell())
         self.trail.append((x - self.ox, y - self.oy))
@@ -473,6 +645,13 @@ class Renderer:
                 gfx.arc(self.screen, C.SHIELD_C, (x - 18, y - 18, 36, 36), a0, a0 + 0.6, 2)
 
     def _draw_hunter(self, h, world, idx):
+        """Draw one hunter in the style of its brain (Mirror twin, Mind Reader dots, confused "?").
+
+        Args:
+            h: the Hunter to draw.
+            world: the World being drawn.
+            idx: the hunter's index (for its speech bubble).
+        """
         vx, vy = h.visual_cell()
         x, y = self.px((vx, vy))
         confused = world.confused and world.phase == "play"
@@ -521,6 +700,7 @@ class Renderer:
             self.blit_text("?", 34, C.WARN, (x + 24, y - 20 + bob), "center")
 
     def _draw_effects(self):
+        """Draw particles and floating texts."""
         for p in self.effects.particles:
             k = p.life / p.max_life
             gfx.circle(self.screen, scale(p.color, 0.4 + 0.6 * k), (p.x + self.ox, p.y + self.oy),
@@ -534,7 +714,12 @@ class Renderer:
             self.blit_text(t.text, t.size, col, (x, y), "center")
 
     def _draw_bubbles(self, world, dt):
-        """Speech bubbles above hunters (taunts)."""
+        """Speech bubbles above hunters (taunts).
+
+        Args:
+            world: the World being drawn.
+            dt: seconds since the last frame (bubbles fade out).
+        """
         for idx in list(self.bubbles):
             b = self.bubbles[idx]
             b[1] -= dt
@@ -566,6 +751,11 @@ class Renderer:
             gfx.blit(self.screen, bubble, (bx, by - (0 if above else 10)))
 
     def _draw_status_pills(self, world):
+        """Pills in the arena corner showing active states (AI Vision, frozen, decoy, confused, shield).
+
+        Args:
+            world: the World being drawn.
+        """
         if world.phase == "killcam":
             return
         x, y = C.ARENA_X + 12, C.ARENA_Y + 12
@@ -581,7 +771,11 @@ class Renderer:
             x += self.pill(x, y, "SHIELD", C.SHIELD_C) + 8
 
     def _draw_killcam(self, world):
-        """Replay: the path the AI predicted vs the path you actually took."""
+        """Replay: the path the AI predicted vs the path you actually took.
+
+        Args:
+            world: the World being drawn.
+        """
         kc = world.killcam
         if world.phase == "killcam":
             prog = 1.0 - world.phase_timer / C.KILLCAM_TIME
@@ -650,6 +844,11 @@ class Renderer:
                        "center")
 
     def _draw_banner(self, world):
+        """Big centred banner for the level intro and level clear phases.
+
+        Args:
+            world: the World being drawn.
+        """
         cx = C.ARENA_X + C.ARENA_W // 2
         cy = C.ARENA_Y + C.ARENA_H // 2
         if world.phase == "intro":
@@ -680,7 +879,15 @@ class Renderer:
 
     # ============================================================== controls
     def button(self, rect, action, label, active=False, color=None):
-        """Draw a touch button and register it so taps on it trigger `action`."""
+        """Draw a touch button and register it so taps on it trigger `action`.
+
+        Args:
+            rect: (x, y, w, h) in logical pixels.
+            action: action name sent to the app when tapped, e.g. "pause".
+            label: text on the button.
+            active: True draws it highlighted (e.g. AI Vision on).
+            color: accent colour; None uses the player cyan.
+        """
         color = color or C.PLAYER
         r = pygame.Rect(rect)
         fill = scale(color, 0.22) if active else C.CARD_BG
@@ -690,13 +897,24 @@ class Renderer:
         self.buttons.append((r, action))
 
     def button_at(self, pos):
-        """The action of the button under `pos` (with some finger tolerance), else None."""
+        """The action of the button under `pos` (with some finger tolerance), else None.
+
+        Args:
+            pos: (x, y) in logical pixels.
+        """
         for rect, action in reversed(self.buttons):
             if rect.inflate(12, 12).collidepoint(pos):
                 return action
         return None
 
     def _draw_dpad(self, cx, cy, offset, r):
+        """Draw the on-screen D-pad and register its four direction buttons.
+
+        Args:
+            cx, cy: centre in logical pixels.
+            offset: distance from the centre to each button.
+            r: radius of each button.
+        """
         for d, (dx, dy) in C.DIRS.items():
             bx, by = cx + dx * offset, cy + dy * offset
             active = d in self.pressed_dirs
@@ -707,6 +925,12 @@ class Renderer:
         gfx.circle(self.screen, C.CARD_EDGE, (cx, cy), 10, 2)
 
     def _draw_controls(self, world, muted):
+        """Draw the keyboard hint (desktop) or the touch buttons and D-pad (phones).
+
+        Args:
+            world: the World being drawn.
+            muted: whether sound is off (for the SOUND button label).
+        """
         if not C.TOUCH:
             hint = "ARROWS / WASD  move     V  AI vision     P  pause     M  sound"
             self.blit_text(hint, 16, C.DIM, (C.WIDTH // 2, C.HEIGHT - 10), "center", spacing=1)
@@ -731,6 +955,13 @@ class Renderer:
 
     # =================================================================== HUD
     def _draw_bars(self, world, bx, by, bw):
+        """Draw the orb progress bar and the CHAOS meter.
+
+        Args:
+            world: the World being drawn.
+            bx, by: top-left of the bars in logical pixels.
+            bw: width of the bars in logical pixels.
+        """
         need = world.level.orbs
         got = min(world.orbs_level, need)
         self.blit_text(f"ORBS  {got} / {need}", 17, C.TEXT, (bx, by), spacing=2)
@@ -757,6 +988,13 @@ class Renderer:
             gfx.rect(self.screen, col, (cbx, cy - 4, max(6, int(cbw * frac)), 8), border_radius=4)
 
     def _draw_hud(self, world, best, muted):
+        """Draw the top bar: title, level, score, bars, time and best score.
+
+        Args:
+            world: the World being drawn.
+            best: best score so far.
+            muted: whether sound is off.
+        """
         self.blit_text("PREDICTABLE", 34, C.TEXT, (C.ARENA_X, 16), spacing=3)
         self.blit_text(f"LEVEL {world.level_no}  ·  {world.level.name}", 18, C.MUTED,
                        (C.ARENA_X + 1, 50), spacing=1)
@@ -782,6 +1020,11 @@ class Renderer:
 
     def _draw_panel(self, world):
         # --- hunter brain -----------------------------------------------
+        """Draw the side cards: hunter brain, mind model probabilities and read accuracy.
+
+        Args:
+            world: the World being drawn.
+        """
         x, y, w, h = C.CARD_BRAIN
         lead = world.hunters[0].color
         self.card((x, y, w, h), "HUNTER BRAIN", lead)
@@ -848,6 +1091,14 @@ class Renderer:
 
     # ================================================================= title
     def _title_surface(self, size):
+        """Build the glowing PREDICTABLE logo.
+
+        Args:
+            size: font size in logical pixels.
+
+        Returns:
+            (glow surface, text surface, padding in logical pixels).
+        """
         text = self.text_surface("PREDICTABLE", size, C.TEXT, 6)
         w, h = text.get_size()
         pad_logical = 40
@@ -866,6 +1117,15 @@ class Renderer:
         return surf, text, pad_logical
 
     def draw_title(self, dt, best, runs, types_found=0, muted=False):
+        """Draw the title screen.
+
+        Args:
+            dt: seconds since the last frame (animations).
+            best: best score, shown in the stats line.
+            runs: number of runs played.
+            types_found: how many of the 8 player types have been unlocked.
+            muted: whether sound is off (for the SOUND button).
+        """
         self.t += dt
         self.buttons = []
         scr = self.screen
@@ -963,6 +1223,7 @@ class Renderer:
 
     # ================================================================= pause
     def draw_pause(self):
+        """Draw the pause overlay (with RESUME / QUIT buttons on touch screens)."""
         self.buttons = []
         self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 190))
         cx, cy = C.WIDTH // 2, C.HEIGHT // 2
@@ -977,6 +1238,19 @@ class Renderer:
     # ============================================================= game over
     def draw_game_over(self, world, dt, summary, best, new_best, history, muted,
                        new_type=False, types_found=0):
+        """Draw the game-over card on top of the last frame.
+
+        Args:
+            world: the World being drawn.
+            dt: seconds since the last frame.
+            summary: the run's statistics from World.summary().
+            best: best score so far.
+            new_best: True if this run set a new best score.
+            history: list of earlier run summaries (for the readability chart).
+            muted: whether sound is off.
+            new_type: True if this run unlocked a new player type.
+            types_found: number of player types unlocked so far.
+        """
         self.draw_game(world, dt, best, muted)
         self.buttons = []
         self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 215))

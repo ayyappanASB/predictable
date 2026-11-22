@@ -15,12 +15,22 @@ from game.audio import Audio  # noqa: E402
 
 class FakeClock:
     def tick(self, fps=0):
+        """Pretend exactly 1/60 s passed so tests are deterministic; `fps` is ignored."""
         return 1000 // 60
 
 
 @pytest.fixture(params=C.LAYOUTS)
 def app(request, tmp_path, monkeypatch):
-    """Every rendering test runs in all three layouts (desktop, phone landscape, phone portrait)."""
+    """Every rendering test runs in all three layouts (desktop, phone landscape, phone portrait).
+
+    Args:
+        request: pytest request; request.param is the layout name.
+        tmp_path: temporary folder for the save file.
+        monkeypatch: used to point storage at the temporary save file.
+
+    Yields:
+        A headless App, closed again after the test.
+    """
     monkeypatch.setattr(storage, "DESKTOP_FILE", str(tmp_path / "save.json"))
     a = App(layout=request.param)
     a.clock = FakeClock()
@@ -32,17 +42,29 @@ def app(request, tmp_path, monkeypatch):
 
 
 def frames(app, n):
+    """Run `n` frames of `app`."""
     for _ in range(n):
         app.frame()
 
 
 def test_title_screen(app):
+    """The title screen draws and stays on the title.
+
+    Args:
+        app: the App fixture (runs once per layout).
+    """
     frames(app, 10)
     assert app.state == "title"
 
 
 @pytest.mark.parametrize("level", [1, 2, 3, 4, 5, 6, 7])
 def test_every_level_draws_with_vision(app, level):
+    """Every level (including the Gauntlet) draws with AI Vision on.
+
+    Args:
+        app: the App fixture (runs once per layout).
+        level: level number to draw.
+    """
     app.start_run()
     app.world.start_level(level)
     app.renderer.vision = True
@@ -50,6 +72,11 @@ def test_every_level_draws_with_vision(app, level):
 
 
 def test_effects_and_bubbles_draw(app):
+    """All status effects, speech bubbles and particles draw together.
+
+    Args:
+        app: the App fixture (runs once per layout).
+    """
     app.start_run()
     w = app.world
     w.phase = "play"
@@ -63,6 +90,11 @@ def test_effects_and_bubbles_draw(app):
 
 
 def test_full_death_flow_and_game_over(app):
+    """A real catch runs death, kill-cam and game over, saves the type, and SPACE restarts.
+
+    Args:
+        app: the App fixture (runs once per layout).
+    """
     app.start_run()
     w = app.world
     w.start_level(3)
@@ -87,6 +119,12 @@ def test_full_death_flow_and_game_over(app):
 
 @pytest.mark.parametrize("type_id", list(profile.TYPES))
 def test_game_over_card_for_every_type(app, type_id):
+    """The game-over card draws for every player type.
+
+    Args:
+        app: the App fixture (runs once per layout).
+        type_id: player type shown on the card.
+    """
     app.start_run()
     w = app.world
     w._die(0)
@@ -98,6 +136,11 @@ def test_game_over_card_for_every_type(app, type_id):
 
 
 def test_killcam_skip_with_space(app):
+    """SPACE skips the kill-cam.
+
+    Args:
+        app: the App fixture (runs once per layout).
+    """
     app.start_run()
     w = app.world
     w.phase = "play"
@@ -108,6 +151,11 @@ def test_killcam_skip_with_space(app):
 
 
 def test_pause_and_resume(app):
+    """P pauses and resumes the game.
+
+    Args:
+        app: the App fixture (runs once per layout).
+    """
     app.start_run()
     app.on_key(pygame.K_p)
     app.frame()
@@ -117,6 +165,7 @@ def test_pause_and_resume(app):
 
 
 def test_audio_is_safe_without_device():
+    """Sound calls never crash, even without an audio device or with unknown names."""
     a = Audio()
     a.play("orb")
     a.play("heartbeat", 0.9)

@@ -43,7 +43,16 @@ LINES = {
 
 
 def line(kind, rng, **fmt):
-    """Pick a random line of the given kind and fill in its fields."""
+    """Pick a random line of the given kind and fill in its fields.
+
+    Args:
+        kind: key into LINES, e.g. "called_it" or "opener_astar".
+        rng: random.Random used to choose the line.
+        **fmt: values for the {fields} in the line, e.g. move="LEFT", n=6.
+
+    Returns:
+        The finished text; if a needed field is missing, a line without fields.
+    """
     options = LINES[kind]
     text = rng.choice(options)
     try:
@@ -55,7 +64,15 @@ def line(kind, rng, **fmt):
 
 
 def death_line(predictor, rng):
-    """A personalised line using the habits the model actually found."""
+    """A personalised line using the habits the model actually found.
+
+    Args:
+        predictor: the MarkovPredictor with this run's turn statistics.
+        rng: random.Random for the fallback line.
+
+    Returns:
+        e.g. "You turned RIGHT after UP 10 times. I noticed."
+    """
     if predictor.turns:
         (prev, move), count = predictor.turns.most_common(1)[0]
         if count >= 3:

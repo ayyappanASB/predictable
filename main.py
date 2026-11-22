@@ -20,6 +20,11 @@ from game.app import App
 
 
 async def main():
+    """Create the game and run its frame loop until the window is closed.
+
+    `await asyncio.sleep(0)` hands control back to the browser after every
+    frame, which pygbag needs to run the game as WebAssembly.
+    """
     app = App()
     while app.running:
         app.frame()

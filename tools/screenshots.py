@@ -30,11 +30,20 @@ OUT = os.path.join(ROOT, "docs", "screenshots", *([] if LAYOUT == "desktop" else
 
 class FakeClock:
     def tick(self, fps):
+        """Pretend exactly 1/60 s passed, so screenshots are the same on every machine.
+
+        Args:
+            fps: target frame rate (ignored).
+        """
         return 1000 // 60
 
 
 def bot_steer(app):
-    """Head for the orb with A* so the run looks like real play."""
+    """Head for the orb with A* so the run looks like real play.
+
+    Args:
+        app: the running App.
+    """
     w = app.world
     if not w.orb:
         return
@@ -45,6 +54,13 @@ def bot_steer(app):
 
 
 def run(app, frames, bot=True):
+    """Advance the app by a number of frames.
+
+    Args:
+        app: the running App.
+        frames: how many frames to run.
+        bot: True to let the A* bot steer the player.
+    """
     for _ in range(frames):
         if bot and app.state == "play":
             bot_steer(app)
@@ -52,12 +68,26 @@ def run(app, frames, bot=True):
 
 
 def shot(app, name):
+    """Save the current screen as docs/screenshots/<name>.png.
+
+    Args:
+        app: the running App.
+        name: file name without extension.
+    """
     os.makedirs(OUT, exist_ok=True)
     pygame.image.save(app.screen, os.path.join(OUT, name + ".png"))
     print("saved", name)
 
 
 def play_until_death(app, level, bot=True, limit=60 * 60):
+    """Start `level` and play until the player is caught or the frame limit is reached.
+
+    Args:
+        app: the running App.
+        level: level number to play.
+        bot: True to let the A* bot steer the player.
+        limit: maximum number of frames.
+    """
     w = app.world
     w.start_level(level)
     w.phase = "play"
@@ -70,6 +100,7 @@ def play_until_death(app, level, bot=True, limit=60 * 60):
 
 
 def main():
+    """Drive the real app headlessly through every screen and save a screenshot of each."""
     random.seed(1)
     app = App(scale=float(os.environ.get("PREDICTABLE_SCALE", "2")))   # 2x = Retina-sharp images
     app.clock = FakeClock()

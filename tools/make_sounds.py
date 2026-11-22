@@ -19,6 +19,16 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
 
 
 def tone(freq_fn, dur, wave_fn="sine", vol=0.5, attack=0.005, release=0.08):
+    """Synthesise one sound as a list of samples (-1..1).
+
+    Args:
+        freq_fn: function progress (0..1) -> frequency in Hz, so the pitch can slide.
+        dur: length in seconds.
+        wave_fn: waveform: "sine", "square", "tri" or anything else for noise.
+        vol: volume 0..1.
+        attack: fade-in time in seconds (avoids clicks).
+        release: fade-out time in seconds.
+    """
     n = int(RATE * dur)
     out, phase = [], 0.0
     for i in range(n):
@@ -40,6 +50,7 @@ def tone(freq_fn, dur, wave_fn="sine", vol=0.5, attack=0.005, release=0.08):
 
 
 def concat(*parts):
+    """Join sounds one after another; `*parts` are sample lists."""
     out = []
     for p in parts:
         out.extend(p)
@@ -47,11 +58,18 @@ def concat(*parts):
 
 
 def mixdown(*parts):
+    """Play sounds at the same time by adding their samples; `*parts` are sample lists."""
     n = max(len(p) for p in parts)
     return [sum(p[i] for p in parts if i < len(p)) for i in range(n)]
 
 
 def write(name, samples):
+    """Save samples as assets/sounds/<name>.ogg (WAV first, then converted with ffmpeg).
+
+    Args:
+        name: file name without extension, e.g. "orb".
+        samples: list of samples between -1 and 1.
+    """
     os.makedirs(OUT, exist_ok=True)
     wav_path = os.path.join(OUT, name + ".wav")
     with wave.open(wav_path, "wb") as w:
@@ -67,6 +85,7 @@ def write(name, samples):
 
 
 def main():
+    """Generate every sound effect and both music loops."""
     random.seed(4)
     write("orb", concat(tone(lambda p: 880 + 440 * p, 0.06, "tri", 0.5, release=0.02),
                         tone(lambda p: 1320 + 300 * p, 0.10, "tri", 0.45)))
@@ -100,12 +119,21 @@ def main():
 
 
 def music(bpm, intense):
-    """A 4-bar loop: kick, hats and an A-minor bass line (seamless when looped)."""
+    """A 4-bar loop: kick, hats and an A-minor bass line (seamless when looped).
+
+    Args:
+        bpm: tempo in beats per minute.
+        intense: True adds extra hi-hats, a snare and a faster bass (levels 4+).
+
+    Returns:
+        The normalised sample list.
+    """
     beat = int(RATE * 60 / bpm)
     total = beat * 16
     buf = [0.0] * total
 
     def add(start, samples):
+        """Mix `samples` into the loop buffer starting at sample index `start`."""
         for i, s in enumerate(samples):
             j = start + i
             if j < total:

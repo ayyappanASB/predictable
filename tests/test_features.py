@@ -12,7 +12,15 @@ from game.world import World
 
 
 def open_world(seed=1, level=4):
-    """A world on an empty arena (every inner cell is a junction), intro skipped."""
+    """A world on an empty arena (every inner cell is a junction), intro skipped.
+
+    Args:
+        seed: random seed for the world.
+        level: level to start, which decides the hunter brains.
+
+    Returns:
+        The prepared World.
+    """
     w = World(seed=seed)
     w.start_level(level)
     w.arena = Arena(C.COLS, C.ROWS)
@@ -27,12 +35,18 @@ def open_world(seed=1, level=4):
 
 
 def train(predictor, move="R", n=30):
+    """Teach `predictor` a habit by observing the same `move` `n` times."""
     for _ in range(n):
         predictor.observe(move)
 
 
 def step_player(w, direction):
-    """Advance frames until the player has taken exactly one step."""
+    """Advance frames until the player has taken exactly one step.
+
+    Args:
+        w: the World being simulated.
+        direction: direction to steer ("U", "R", "D" or "L").
+    """
     start = w.player.cell
     w.steer(direction)
     for _ in range(60):
@@ -44,6 +58,7 @@ def step_player(w, direction):
 
 # ------------------------------------------------------------------ taunts
 def test_taunt_lines_fill_fields_and_fall_back():
+    """Taunts fill in their fields, and fall back to field-free lines when a value is missing."""
     rng = random.Random(0)
     for _ in range(50):
         text = taunts.line("called_it", rng, move="LEFT")
@@ -53,12 +68,14 @@ def test_taunt_lines_fill_fields_and_fall_back():
 
 
 def test_every_brain_has_an_opener():
+    """Every hunter brain has an opening line."""
     from game.ai.brains import BRAINS
     for brain_id in BRAINS:
         assert ("opener_" + brain_id) in taunts.LINES
 
 
 def test_death_line_uses_real_habits():
+    """The death quote names the player's real favourite turn."""
     p = MarkovPredictor()
     for _ in range(4):
         for m in "UUL":
@@ -68,6 +85,7 @@ def test_death_line_uses_real_habits():
 
 
 def test_opener_taunt_when_level_starts():
+    """A hunter speaks when the level intro ends."""
     w = World(seed=2)
     for _ in range(int(C.INTRO_TIME * 60) + 5):
         w.update(1 / 60)
@@ -75,6 +93,7 @@ def test_opener_taunt_when_level_starts():
 
 
 def test_streak_taunt_when_player_is_predictable():
+    """Repeating predicted moves at junctions builds a streak and triggers a taunt."""
     w = open_world()
     train(w.predictor, "R")
     w.freeze_timer = 1e9                     # hunters stay put
@@ -89,6 +108,7 @@ def test_streak_taunt_when_player_is_predictable():
 
 # --------------------------------------------------------- surprise & chaos
 def test_predictor_observe_returns_guess_and_confidence():
+    """observe() reports the guess it would have made and how confident it was."""
     p = MarkovPredictor()
     train(p, "R", 20)
     guess, conf = p.observe("U")
@@ -96,6 +116,7 @@ def test_predictor_observe_returns_guess_and_confidence():
 
 
 def test_surprise_gives_points_and_chaos():
+    """Beating a confident prediction gives bonus points and fills the CHAOS meter."""
     w = open_world()
     train(w.predictor, "R")
     score = w.score
@@ -107,12 +128,14 @@ def test_surprise_gives_points_and_chaos():
 
 
 def test_no_surprise_before_model_is_trained():
+    """No surprise bonus is given while the model is still untrained."""
     w = open_world()
     step_player(w, "U")
     assert w.surprises == 0
 
 
 def test_surprise_cooldown_limits_spam():
+    """The cooldown stops surprise bonuses from being farmed."""
     w = open_world()
     train(w.predictor, "R", 200)
     step_player(w, "U")
@@ -122,6 +145,7 @@ def test_surprise_cooldown_limits_spam():
 
 
 def test_full_chaos_meter_confuses_hunters():
+    """A full CHAOS meter confuses the hunters, who then move randomly without errors."""
     w = open_world()
     train(w.predictor, "R")
     w.chaos = 1.0 - C.CHAOS_PER_SURPRISE + 0.01   # a little extra: the meter decays each frame
@@ -135,6 +159,7 @@ def test_full_chaos_meter_confuses_hunters():
 
 
 def test_chaos_decays_over_time():
+    """The CHAOS meter slowly drains when the player stops surprising the AI."""
     w = open_world()
     w.chaos = 0.5
     w.freeze_timer = 1e9
@@ -145,6 +170,7 @@ def test_chaos_decays_over_time():
 
 # ---------------------------------------------------------------- kill-cam
 def test_death_goes_through_killcam_then_over():
+    """A catch plays the death, kill-cam and game-over phases with a complete replay."""
     w = open_world(level=3)
     w.hunters[0].place(w.arena.step(w.player.cell, "R"))
     phases = set()
@@ -161,6 +187,7 @@ def test_death_goes_through_killcam_then_over():
 
 
 def test_killcam_can_be_skipped():
+    """Skipping the kill-cam goes straight to game over."""
     w = open_world(level=3)
     w.hunters[0].place(w.arena.step(w.player.cell, "R"))
     for _ in range(120):
@@ -173,6 +200,7 @@ def test_killcam_can_be_skipped():
 
 
 def test_killcam_reports_how_early_it_was_predicted():
+    """The kill-cam caption says how many moves ago the catch was predicted."""
     w = open_world(level=4)
     h = w.hunters[0]
     now = w.predictor.total_observed
@@ -184,6 +212,7 @@ def test_killcam_reports_how_early_it_was_predicted():
 
 
 def test_hunter_remembers_forecast_until_contact():
+    """The hunter keeps its earlier forecast when it stops forecasting at close range."""
     w = open_world(level=4)
     train(w.predictor, "R")
     h = w.hunters[0]
@@ -197,6 +226,7 @@ def test_hunter_remembers_forecast_until_contact():
 
 # ------------------------------------------------------------------ mirror
 def test_mirror_hunts_a_still_player():
+    """The Mirror catches a player who stands still."""
     w = open_world(level=6)
     w.hunters = [h for h in w.hunters if h.brain.id == "mirror"]
     for _ in range(60 * 12):
@@ -207,6 +237,7 @@ def test_mirror_hunts_a_still_player():
 
 
 def test_mirror_copies_habits_when_moves_are_equally_good():
+    """When two moves are equally good, the Mirror picks the one matching the player's habit."""
     for habit in ("R", "D"):
         w = open_world(level=6)
         train(w.predictor, habit, 40)
@@ -218,6 +249,7 @@ def test_mirror_copies_habits_when_moves_are_equally_good():
 
 
 def test_wanderer_drift_and_pure_random():
+    """A full-drift wanderer steps towards the player; a pure random one only makes legal moves."""
     w = open_world(level=1)
     h = w.hunters[0]
     h.place((2, 6))
@@ -232,6 +264,7 @@ def test_wanderer_drift_and_pure_random():
 
 
 def test_danger_rises_when_hunter_is_close():
+    """The danger level rises when a hunter is two cells away."""
     w = open_world(level=3)
     w.freeze_timer = 0
     w.hunters[0].place((w.player.cell[0] + 2, w.player.cell[1]))
@@ -243,6 +276,7 @@ def test_danger_rises_when_hunter_is_close():
 
 # ------------------------------------------------------------ player types
 def summary(**kw):
+    """A fake run summary with neutral values, overridden by the keyword arguments `**kw`."""
     base = {"moves": 50, "accuracy": 0.6, "close_calls": 0, "surprises": 0, "straight": 0.5,
             "turns_total": 10, "favourite_share": 0.2, "favourite_turn": ("U", "L")}
     base.update(kw)
@@ -250,6 +284,7 @@ def summary(**kw):
 
 
 def test_player_types():
+    """Each player-type rule fires for its own statistics (includes the 81% Zigzag regression)."""
     assert profile.classify(summary(moves=5)) == "mystery"
     assert profile.classify(summary(accuracy=0.3)) == "gremlin"
     assert profile.classify(summary(close_calls=3)) == "daredevil"
@@ -264,6 +299,7 @@ def test_player_types():
 
 
 def test_loyalist_name_uses_turn_direction():
+    """The Loyalist name contains the favourite turn, and every type has a name, tagline and colour."""
     name, _, _ = profile.describe("loyalist", summary(favourite_turn=("U", "R")))
     assert name == "THE RIGHT-TURN LOYALIST"
     for type_id in profile.TYPES:
@@ -272,6 +308,7 @@ def test_loyalist_name_uses_turn_direction():
 
 
 def test_world_summary_has_everything_the_card_needs():
+    """World.summary() contains every field the game-over card uses."""
     w = open_world()
     s = w.summary()
     for key in ("score", "time", "orbs", "level", "level_name", "accuracy", "moves", "straight",
@@ -283,6 +320,12 @@ def test_world_summary_has_everything_the_card_needs():
 
 # ---------------------------------------------------------------- storage
 def test_storage_round_trip(tmp_path, monkeypatch):
+    """Saved data loads back unchanged.
+
+    Args:
+        tmp_path: pytest's temporary folder, so the real save file is never touched.
+        monkeypatch: pytest fixture used to point storage at the temporary file.
+    """
     monkeypatch.setattr(storage, "DESKTOP_FILE", str(tmp_path / "save.json"))
     assert storage.load() == {"best": 0, "runs": [], "types": []}
     storage.save({"best": 1234, "runs": [{"accuracy": 0.5}], "types": ["habit"]})
@@ -291,6 +334,12 @@ def test_storage_round_trip(tmp_path, monkeypatch):
 
 
 def test_storage_survives_corrupt_file(tmp_path, monkeypatch):
+    """A corrupt save file gives the default data instead of crashing.
+
+    Args:
+        tmp_path: pytest's temporary folder, so the real save file is never touched.
+        monkeypatch: pytest fixture used to point storage at the temporary file.
+    """
     bad = tmp_path / "save.json"
     bad.write_text("{not json")
     monkeypatch.setattr(storage, "DESKTOP_FILE", str(bad))

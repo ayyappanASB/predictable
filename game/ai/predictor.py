@@ -18,6 +18,15 @@ from ..config import DIR_ORDER, OPPOSITE
 
 class MarkovPredictor:
     def __init__(self, order: int = 2, alpha: float = 0.5, min_count: int = 3):
+        """Create an empty model.
+
+        Args:
+            order: length of the move history used as context (2 = last two moves).
+            alpha: Laplace (add-alpha) smoothing strength, so unseen moves never
+                get probability 0.
+            min_count: observations a context needs before it is trusted; with
+                fewer the model backs off to a shorter context.
+        """
         self.order = order
         self.alpha = alpha            # Laplace smoothing strength
         self.min_count = min_count    # observations needed before trusting a context
@@ -39,10 +48,32 @@ class MarkovPredictor:
 
     # ------------------------------------------------------------- inference
     def _context(self, history, k):
+        """Return the last `k` moves of a history as a hashable tuple.
+
+        Args:
+            history: list of moves ("U", "R", "D", "L").
+            k: context length; 0 gives the empty context ().
+
+        Returns:
+            Tuple of the last k moves.
+        """
         return tuple(history[-k:]) if k else ()
 
     def distribution(self, valid=DIR_ORDER, history=None) -> dict:
-        """Probability of each valid next move given the recent history."""
+        """Probability of each valid next move given the recent history.
+
+        Backs off from the longest context to the shortest one with enough data,
+        then applies Laplace smoothing.
+
+        Args:
+            valid: moves that are physically possible from the current cell;
+                walls are excluded so probability is only spread over real options.
+            history: move history to condition on; None uses the player's own
+                history for this run (the Mirror passes its own history instead).
+
+        Returns:
+            Dict move -> probability (sums to 1), or {} if no move is valid.
+        """
         valid = [m for m in DIR_ORDER if m in valid]
         if not valid:
             return {}
@@ -58,14 +89,34 @@ class MarkovPredictor:
         return {m: (counter[m] + self.alpha) / total for m in valid}
 
     def predict(self, valid=DIR_ORDER, history=None):
-        """Most likely next move (ties broken by a fixed order for determinism)."""
+        """Most likely next move (ties broken by a fixed order for determinism).
+
+        Args:
+            valid: moves that are possible from the current cell.
+            history: move history to condition on; None uses the player's history.
+
+        Returns:
+            The predicted move ("U", "R", "D" or "L"), or None if nothing is valid.
+        """
         dist = self.distribution(valid, history)
         if not dist:
             return None
         return max(DIR_ORDER, key=lambda m: (dist.get(m, -1), -DIR_ORDER.index(m)))
 
     def rollout(self, start, arena, steps: int) -> list:
-        """Forecast the player's next `steps` cells by chaining predictions."""
+        """Forecast the player's next `steps` cells by chaining predictions.
+
+        Each predicted move is appended to a copy of the history, so later steps are
+        conditioned on the earlier predictions.
+
+        Args:
+            start: the player's current cell.
+            arena: the Arena, used for valid moves and for stepping between cells.
+            steps: how many cells ahead to forecast.
+
+        Returns:
+            List of forecast cells (may be shorter than `steps` at a dead end).
+        """
         history = list(self.history)
         cell = start
         cells = []
@@ -83,9 +134,16 @@ class MarkovPredictor:
     def observe(self, move: str, valid=DIR_ORDER):
         """Score the prediction we would have made, then learn from the move.
 
-        Returns (guess, confidence): the move the model expected and the
-        probability it gave that move, which the game uses for taunts and the
-        surprise bonus.
+        Updates the counts for every context length (online learning), the run's
+        accuracy, straight-line ratio and turn statistics.
+
+        Args:
+            move: the move the player actually made.
+            valid: moves that were possible at that moment (for a fair prediction).
+
+        Returns:
+            (guess, confidence): the move the model expected and the probability it
+            gave that move, which the game uses for taunts and the surprise bonus.
         """
         dist = self.distribution(valid)
         guess = max(DIR_ORDER, key=lambda m: (dist.get(m, -1), -DIR_ORDER.index(m))) if dist else None
@@ -109,22 +167,27 @@ class MarkovPredictor:
     # ----------------------------------------------------------------- stats
     @property
     def accuracy(self) -> float:
+        """Share of this run's moves the model predicted correctly (0..1)."""
         return self.run_hits / self.run_total if self.run_total else 0.0
 
     @property
     def straight_ratio(self) -> float:
+        """Share of this run's moves that continued in the same direction (0..1)."""
         n = self.run_total - 1
         return self.run_straight / n if n > 0 else 0.0
 
     @property
     def turns_total(self) -> int:
+        """Number of turns (direction changes, excluding reversals) this run."""
         return sum(self.turns.values())
 
     def favourite_share(self) -> float:
+        """Share of all turns taken by the most common turn (0..1)."""
         total = self.turns_total
         return self.turns.most_common(1)[0][1] / total if total else 0.0
 
     def favourite_turn(self):
+        """The most common (previous move, next move) turn, or None if no turns yet."""
         if not self.turns:
             return None
         return self.turns.most_common(1)[0][0]

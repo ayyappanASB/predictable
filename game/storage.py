@@ -15,6 +15,7 @@ DEFAULT = {"best": 0, "runs": [], "types": []}
 
 
 def _web_storage():
+    """The browser's localStorage when running under pygbag, otherwise None."""
     if sys.platform != "emscripten":
         return None
     try:
@@ -25,6 +26,12 @@ def _web_storage():
 
 
 def load() -> dict:
+    """Load the save data; never raises.
+
+    Returns:
+        Dict with "best" (best score), "runs" (last 50 runs) and "types"
+        (player types found); defaults if nothing is saved or the data is bad.
+    """
     try:
         store = _web_storage()
         if store is not None:
@@ -42,6 +49,11 @@ def load() -> dict:
 
 
 def save(data: dict):
+    """Save the data to localStorage (web) or a JSON file (desktop); errors are ignored.
+
+    Args:
+        data: dict with "best", "runs" and "types" as returned by load().
+    """
     try:
         raw = json.dumps({"best": data.get("best", 0), "runs": data.get("runs", [])[-50:],
                           "types": data.get("types", [])})

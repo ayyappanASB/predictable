@@ -12,7 +12,18 @@ from dataclasses import dataclass, field
 
 
 def manhattan(a, b) -> int:
-    """Admissible and consistent heuristic for 4-connected grids with unit cost."""
+    """Manhattan (city-block) distance between two grid cells.
+
+    It is the heuristic for A*: admissible and consistent on a 4-connected grid
+    where every step costs 1, so A* still finds the shortest path.
+
+    Args:
+        a: first cell as (col, row).
+        b: second cell as (col, row).
+
+    Returns:
+        |dx| + |dy| as an int.
+    """
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
@@ -24,17 +35,29 @@ class SearchResult:
 
     @property
     def found(self) -> bool:
+        """True when the search reached the goal (the path is not empty)."""
         return bool(self.path)
 
 
 def astar(start, goal, neighbors, heuristic=manhattan, cost=None) -> SearchResult:
-    """A* search.
+    """A* search from `start` to `goal`.
 
     f(n) = g(n) + h(n), where g is the cost so far and h the heuristic estimate.
-    `cost(a, b)` optionally gives the step cost (default 1); it must be >= 1 for
-    the Manhattan heuristic to stay admissible.
     Ties on f are broken towards larger g (deeper nodes), which reduces the
     number of expanded nodes on open grids.
+
+    Args:
+        start: cell the search starts from (the hunter's cell).
+        goal: cell to reach (the player, or a predicted interception cell).
+        neighbors: function cell -> list of walkable neighbouring cells.
+        heuristic: function (cell, goal) -> estimated remaining cost
+            (default: Manhattan distance).
+        cost: optional function (a, b) -> step cost; None means every step
+            costs 1. It must be >= 1 for the Manhattan heuristic to stay admissible.
+
+    Returns:
+        SearchResult with the path (start ... goal, or [] if unreachable),
+        the number of expanded nodes and the path cost.
     """
     if start == goal:
         return SearchResult([start], 0, 0)
@@ -78,11 +101,22 @@ def astar(start, goal, neighbors, heuristic=manhattan, cost=None) -> SearchResul
 
 
 def greedy_step(current, goal, neighbors, rng, avoid=None):
-    """Greedy hill-climbing: move to the neighbour closest to the goal.
+    """One step of greedy hill-climbing: move to the neighbour closest to the goal.
 
     It only looks one step ahead, so it gets stuck behind walls (a local
     minimum). When no neighbour improves on the current distance it makes a
     random move instead - this is what makes level 2 beatable.
+
+    Args:
+        current: the hunter's current cell.
+        goal: the cell it wants to get closer to.
+        neighbors: function cell -> list of walkable neighbouring cells.
+        rng: random.Random used to break ties and pick escape moves.
+        avoid: optional cell not to step back into (the previous cell), so it
+            does not jitter back and forth.
+
+    Returns:
+        The next cell, or None if the hunter has nowhere to go.
     """
     options = [n for n in neighbors(current) if n != avoid] or neighbors(current)
     if not options:

@@ -16,10 +16,33 @@ class Brain:
     label = "Brain"
 
     def decide(self, hunter, world):
+        """Choose the hunter's next cell. Every brain overrides this.
+
+        Args:
+            hunter: the Hunter being controlled (its cell, memory and plan).
+            world: the World, giving access to the arena, player, predictor and rng.
+
+        Returns:
+            The next cell to move to, or None to stay put.
+        """
         raise NotImplementedError
 
     @staticmethod
     def _follow(hunter, world, goal):
+        """Plan an A* path to `goal` and return its first step.
+
+        Also stores the plan, target and number of expanded nodes on the hunter so
+        AI Vision and the side panel can show what it is thinking.
+
+        Args:
+            hunter: the Hunter being controlled.
+            world: the World (for the arena's neighbours).
+            goal: the cell to head for.
+
+        Returns:
+            The next cell on the path, or None if the hunter is already there or
+            the goal is unreachable.
+        """
         result = astar(hunter.cell, goal, world.arena.neighbors)
         hunter.expanded = result.expanded
         hunter.plan = result.path[1:]
@@ -39,9 +62,24 @@ class Wanderer(Brain):
     id, label = "wanderer", "Random walk"
 
     def __init__(self, drift: float = 0.3):
+        """Create a random-walk brain.
+
+        Args:
+            drift: probability (0..1) of taking a greedy step towards the player
+                instead of a random one; 0 gives a pure random walk.
+        """
         self.drift = drift
 
     def decide(self, hunter, world):
+        """Random walk: keep going straight most of the time, sometimes drift to the player.
+
+        Args:
+            hunter: the Hunter being controlled.
+            world: the World (arena, rng, and the goal cell for drift steps).
+
+        Returns:
+            The next cell, or None if the hunter is boxed in.
+        """
         arena, rng = world.arena, world.rng
         moves = arena.moves(hunter.cell)
         hunter.plan, hunter.target, hunter.expanded = [], None, 0
@@ -64,6 +102,15 @@ class Greedy(Brain):
     id, label = "greedy", "Greedy hill-climbing"
 
     def decide(self, hunter, world):
+        """Take one greedy hill-climbing step towards the player.
+
+        Args:
+            hunter: the Hunter being controlled (its previous cell is avoided).
+            world: the World (arena, rng and goal cell).
+
+        Returns:
+            The next cell, or None if it has nowhere to go.
+        """
         goal = world.hunter_goal()
         nxt = greedy_step(hunter.cell, goal, world.arena.neighbors, world.rng,
                           avoid=hunter.prev)
@@ -77,6 +124,15 @@ class AStarChaser(Brain):
     id, label = "astar", "A* pathfinding"
 
     def decide(self, hunter, world):
+        """Follow the A* shortest path to the player's current cell.
+
+        Args:
+            hunter: the Hunter being controlled.
+            world: the World (arena and goal cell).
+
+        Returns:
+            The next cell on the shortest path.
+        """
         return self._follow(hunter, world, world.hunter_goal())
 
 
@@ -92,6 +148,19 @@ class MindReader(Brain):
     id, label = "mindreader", "A* + Markov prediction"
 
     def decide(self, hunter, world):
+        """Forecast the player with the Markov model and move to intercept.
+
+        Evaluates each forecast cell: the first one the hunter can reach before the
+        player is chosen; otherwise the one where it arrives least late. Close to
+        the player, or when a decoy is active, it simply chases with A*.
+
+        Args:
+            hunter: the Hunter being controlled (its forecast is stored for AI Vision).
+            world: the World (player, predictor, arena and step times).
+
+        Returns:
+            The next cell on the A* path to the chosen interception cell.
+        """
         player = world.player
         hunter.forecast = []
         if world.decoy_active or manhattan(hunter.cell, player.cell) <= 2:
@@ -132,6 +201,21 @@ class Mirror(Brain):
     PLAN_STEPS = 6
 
     def _choose(self, cell, history, world, dist):
+        """Score every legal move from `cell` and return the best one.
+
+        score(m) = log P_you(m | history) - BETA * (change in distance to the goal),
+        so the chosen move is the one that looks most like the player's habits while
+        getting closer to the player - the move "closest to victory".
+
+        Args:
+            cell: the cell the mirror is deciding from.
+            history: the mirror's own recent moves, used as the Markov context.
+            world: the World (arena and the player's predictor).
+            dist: BFS distance map from the goal cell (from Arena.distances).
+
+        Returns:
+            The best move ("U", "R", "D" or "L"), or None if no move is possible.
+        """
         arena = world.arena
         moves = [m for m in arena.moves(cell) if arena.step(cell, m) in dist]
         if not moves:
@@ -140,12 +224,25 @@ class Mirror(Brain):
         here = dist.get(cell, 0)
 
         def score(m):
+            """Score of move `m`: habit log-probability minus BETA times the change in distance to the goal."""
             gain = dist[arena.step(cell, m)] - here
             return math.log(probs[m]) - self.BETA * gain
 
         return max(moves, key=lambda m: (score(m), -"URDL".index(m)))
 
     def decide(self, hunter, world):
+        """Move like the player would, but towards the player.
+
+        Also simulates the next PLAN_STEPS moves of the same policy so AI Vision can
+        draw where the mirror is going.
+
+        Args:
+            hunter: the Hunter being controlled (its memory holds its last moves).
+            world: the World (arena, goal cell and predictor).
+
+        Returns:
+            The next cell, or None if it cannot move.
+        """
         goal = world.hunter_goal()
         dist = world.arena.distances(goal)
         move = self._choose(hunter.cell, hunter.memory, world, dist)
@@ -172,4 +269,12 @@ BRAINS = {cls.id: cls for cls in (Wanderer, Greedy, AStarChaser, MindReader, Mir
 
 
 def make_brain(brain_id: str) -> Brain:
+    """Create a fresh brain object from its id.
+
+    Args:
+        brain_id: one of "wanderer", "greedy", "astar", "mindreader", "mirror".
+
+    Returns:
+        A new Brain instance.
+    """
     return BRAINS[brain_id]()

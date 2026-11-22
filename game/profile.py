@@ -20,7 +20,15 @@ ORDER = tuple(TYPES)
 
 
 def classify(summary: dict) -> str:
-    """Return the type id for a finished run (rules are checked in priority order)."""
+    """Return the player-type id for a finished run (rules are checked in priority order).
+
+    Args:
+        summary: the dict from World.summary() (moves, accuracy, close_calls,
+            surprises, straight, turns_total, favourite_share).
+
+    Returns:
+        One of the keys of TYPES, e.g. "habit" or "gremlin".
+    """
     moves = summary.get("moves", 0)
     if moves < 12:
         return "mystery"
@@ -41,7 +49,15 @@ def classify(summary: dict) -> str:
 
 
 def describe(type_id: str, summary: dict):
-    """(name, tagline, colour) with dynamic parts filled in."""
+    """Name, tagline and colour of a player type, with dynamic parts filled in.
+
+    Args:
+        type_id: a key of TYPES.
+        summary: the run summary, used for the favourite turn of the Loyalist.
+
+    Returns:
+        (name, tagline, colour) tuple.
+    """
     name, tagline, colour = TYPES[type_id]
     if "{DIR}" in name:
         fav = summary.get("favourite_turn")

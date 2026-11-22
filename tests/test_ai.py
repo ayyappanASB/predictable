@@ -11,11 +11,13 @@ from game.grid import Arena, generate_arena
 
 
 def bfs_length(arena, start, goal):
+    """Shortest path length from `start` to `goal` in `arena` by BFS (the ground truth for A*)."""
     return arena.distances(start).get(goal)
 
 
 # ---------------------------------------------------------------------- A*
 def test_astar_straight_line():
+    """A* finds the 9-step straight path across an empty arena."""
     arena = Arena(10, 5)
     res = astar((0, 2), (9, 2), arena.neighbors)
     assert res.found
@@ -24,12 +26,14 @@ def test_astar_straight_line():
 
 
 def test_astar_start_is_goal():
+    """When start equals goal, A* returns just that cell with cost 0."""
     arena = Arena(5, 5)
     res = astar((2, 2), (2, 2), arena.neighbors)
     assert res.path == [(2, 2)] and res.cost == 0
 
 
 def test_astar_goes_around_wall():
+    """A* routes around a wall through the gap and its path is as short as BFS."""
     walls = {(3, r) for r in range(0, 4)}     # wall with a gap at the bottom row
     arena = Arena(7, 5, walls)
     res = astar((0, 0), (6, 0), arena.neighbors)
@@ -39,6 +43,7 @@ def test_astar_goes_around_wall():
 
 
 def test_astar_unreachable_returns_empty():
+    """A* returns an empty path when a full wall separates start and goal."""
     walls = {(2, r) for r in range(5)}
     arena = Arena(5, 5, walls)
     res = astar((0, 0), (4, 4), arena.neighbors)
@@ -46,6 +51,7 @@ def test_astar_unreachable_returns_empty():
 
 
 def test_astar_path_is_valid_and_contiguous():
+    """Every step of an A* path moves one cell and never enters a wall."""
     arena = generate_arena(17, 13, random.Random(3))
     res = astar((0, 0), (16, 12), arena.neighbors)
     for a, b in zip(res.path, res.path[1:]):
@@ -55,6 +61,11 @@ def test_astar_path_is_valid_and_contiguous():
 
 @pytest.mark.parametrize("seed", range(25))
 def test_astar_is_optimal_on_random_arenas(seed):
+    """A* path lengths match BFS (optimal) for random pairs of cells in generated arenas.
+
+    Args:
+        seed: random seed for the arena and the cell pairs (25 different seeds).
+    """
     rng = random.Random(seed)
     arena = generate_arena(17, 13, rng)
     free = arena.free_cells()
@@ -65,6 +76,7 @@ def test_astar_is_optimal_on_random_arenas(seed):
 
 
 def test_astar_expands_fewer_nodes_than_bfs():
+    """The Manhattan heuristic makes A* expand fewer nodes than an uninformed search would."""
     arena = Arena(30, 30)
     res = astar((0, 0), (29, 29), arena.neighbors)
     # an uninformed BFS explores the whole 900-cell grid for this corner-to-corner query
@@ -72,6 +84,7 @@ def test_astar_expands_fewer_nodes_than_bfs():
 
 
 def test_astar_respects_costs():
+    """With a custom cost function A* avoids an expensive cell."""
     arena = Arena(3, 3)
     expensive = {(1, 1)}
     res = astar((0, 1), (2, 1), arena.neighbors,
@@ -81,6 +94,7 @@ def test_astar_respects_costs():
 
 # ------------------------------------------------------------------ greedy
 def test_greedy_moves_closer_in_open_space():
+    """Greedy hill-climbing steps closer to the goal when nothing is in the way."""
     arena = Arena(9, 9)
     rng = random.Random(0)
     nxt = greedy_step((0, 0), (5, 0), arena.neighbors, rng)
@@ -89,6 +103,7 @@ def test_greedy_moves_closer_in_open_space():
 
 def test_greedy_gets_stuck_behind_wall_and_moves_randomly():
     # goal directly behind a wall: no neighbour gets closer
+    """Behind a wall (local minimum) greedy still returns a legal random move."""
     walls = {(2, 0), (2, 1), (2, 2)}
     arena = Arena(5, 3, walls)
     rng = random.Random(1)
@@ -98,6 +113,7 @@ def test_greedy_gets_stuck_behind_wall_and_moves_randomly():
 
 # --------------------------------------------------------------- predictor
 def test_untrained_predictor_is_uniform():
+    """With no data the predictor gives each of the 4 moves probability 0.25."""
     p = MarkovPredictor()
     dist = p.distribution()
     assert set(dist) == {"U", "R", "D", "L"}
@@ -105,6 +121,7 @@ def test_untrained_predictor_is_uniform():
 
 
 def test_distribution_sums_to_one_and_respects_valid_moves():
+    """Probabilities cover only the valid moves and sum to 1."""
     p = MarkovPredictor()
     for m in "RRDDLLUU" * 5:
         p.observe(m)
@@ -114,6 +131,7 @@ def test_distribution_sums_to_one_and_respects_valid_moves():
 
 
 def test_predictor_learns_a_repeating_pattern():
+    """After training on a repeating pattern the model predicts it with > 90% accuracy."""
     p = MarkovPredictor(order=2)
     pattern = list("RRDDLLUU")
     for m in pattern * 40:
@@ -126,6 +144,7 @@ def test_predictor_learns_a_repeating_pattern():
 
 
 def test_predictor_is_near_chance_on_random_moves():
+    """On random moves accuracy stays near chance (25%): the model cannot be fooled into overconfidence."""
     rng = random.Random(42)
     p = MarkovPredictor()
     for _ in range(4000):
@@ -134,6 +153,7 @@ def test_predictor_is_near_chance_on_random_moves():
 
 
 def test_order_two_beats_order_zero_on_turn_pattern():
+    """Using the last two moves as context beats plain move frequency on a turn pattern."""
     seq = list("RRD" * 300)          # R is most common, but D always follows RR
     o0, o2 = MarkovPredictor(order=0), MarkovPredictor(order=2)
     for m in seq:
@@ -143,6 +163,7 @@ def test_order_two_beats_order_zero_on_turn_pattern():
 
 
 def test_new_run_keeps_learning_but_resets_stats():
+    """new_run() clears per-run stats but keeps everything the model learned."""
     p = MarkovPredictor()
     for m in "RRRR":
         p.observe(m)
@@ -154,6 +175,7 @@ def test_new_run_keeps_learning_but_resets_stats():
 
 
 def test_backoff_when_context_unseen():
+    """For an unseen context the model backs off to overall move frequency."""
     p = MarkovPredictor(order=2, min_count=1)
     for m in "UUUUUUU":
         p.observe(m)
@@ -162,6 +184,7 @@ def test_backoff_when_context_unseen():
 
 
 def test_rollout_follows_walls():
+    """Forecast cells follow the corridor and never go through walls."""
     arena = Arena(5, 1)            # a 1-row corridor
     p = MarkovPredictor()
     for m in "RRRR":
@@ -172,6 +195,7 @@ def test_rollout_follows_walls():
 
 
 def test_straight_ratio_and_favourite_turn():
+    """Straight-line ratio and favourite turn are counted correctly."""
     p = MarkovPredictor()
     for m in "RRRRU":
         p.observe(m)

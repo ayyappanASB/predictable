@@ -12,6 +12,11 @@ from game.world import World
 # ------------------------------------------------------------------ arena
 @pytest.mark.parametrize("seed", range(60))
 def test_generated_arenas_are_playable(seed):
+    """Generated arenas are connected, have no dead ends, keep spawn cells free and have walls.
+
+    Args:
+        seed: random seed for the arena (60 different arenas).
+    """
     arena = generate_arena(C.COLS, C.ROWS, random.Random(seed))
     assert arena.is_connected()
     assert not arena.has_dead_ends()
@@ -20,6 +25,7 @@ def test_generated_arenas_are_playable(seed):
 
 
 def test_arena_is_mirror_symmetric():
+    """Every wall has its mirror image left-right and top-bottom."""
     arena = generate_arena(C.COLS, C.ROWS, random.Random(5))
     for (c, r) in arena.walls:
         assert (C.COLS - 1 - c, r) in arena.walls
@@ -27,6 +33,7 @@ def test_arena_is_mirror_symmetric():
 
 
 def test_generation_is_deterministic_per_seed():
+    """The same seed always produces the same arena."""
     a = generate_arena(C.COLS, C.ROWS, random.Random(9))
     b = generate_arena(C.COLS, C.ROWS, random.Random(9))
     assert a.walls == b.walls
@@ -34,11 +41,13 @@ def test_generation_is_deterministic_per_seed():
 
 # ------------------------------------------------------------------- world
 def skip_intro(world):
+    """Jump `world` straight past the level intro into the play phase."""
     world.phase = "play"
     world.phase_timer = 0
 
 
 def test_new_world_starts_on_level_one():
+    """A new world starts on level 1 in the intro, player in the centre, one hunter and an orb."""
     w = World(seed=1)
     assert w.level_no == 1 and w.phase == "intro"
     assert w.player.cell == w.arena.center
@@ -47,6 +56,7 @@ def test_new_world_starts_on_level_one():
 
 
 def test_hunters_pause_during_intro():
+    """Hunters do not move while the level intro banner is showing."""
     w = World(seed=1)
     start = [h.cell for h in w.hunters]
     for _ in range(int(C.INTRO_TIME * 30)):
@@ -55,6 +65,7 @@ def test_hunters_pause_during_intro():
 
 
 def test_player_moves_and_stops_at_walls():
+    """The player keeps moving in the steered direction until a wall blocks it."""
     w = World(seed=2)
     skip_intro(w)
     w.hunters = []
@@ -68,6 +79,7 @@ def test_player_moves_and_stops_at_walls():
 
 
 def test_collecting_orb_scores_and_respawns():
+    """Collecting an orb adds points and spawns the next orb elsewhere."""
     w = World(seed=3)
     skip_intro(w)
     w.hunters = []
@@ -80,6 +92,7 @@ def test_collecting_orb_scores_and_respawns():
 
 
 def test_combo_multiplies_points():
+    """Quick consecutive orbs multiply the points (100, then +200)."""
     w = World(seed=3)
     skip_intro(w)
     w.hunters = []
@@ -94,6 +107,17 @@ def test_combo_multiplies_points():
 
 
 def run_until(world, cond, seconds=3.0, dt=1 / 60):
+    """Update `world` until `cond()` is true or time runs out.
+
+    Args:
+        world: the World to simulate.
+        cond: function returning True when the wanted state is reached.
+        seconds: maximum simulated time.
+        dt: frame time in seconds.
+
+    Returns:
+        True if the condition was reached in time.
+    """
     for _ in range(int(seconds / dt)):
         world.update(dt)
         if cond():
@@ -102,6 +126,7 @@ def run_until(world, cond, seconds=3.0, dt=1 / 60):
 
 
 def test_caught_when_hunter_reaches_player():
+    """An A* hunter next to the player catches it."""
     w = World(seed=4)
     w.start_level(3)                  # A* hunter: always steps towards the player
     skip_intro(w)
@@ -140,6 +165,7 @@ def test_head_on_crossing_is_caught():
 
 
 def test_shield_saves_once():
+    """A shield absorbs one catch, breaks, and sends the hunter away."""
     w = World(seed=5)
     skip_intro(w)
     w.shield = True
@@ -152,6 +178,7 @@ def test_shield_saves_once():
 
 
 def test_freeze_stops_hunters():
+    """Hunters do not move while Freeze is active."""
     w = World(seed=6)
     skip_intro(w)
     w.freeze_timer = 1.0
@@ -162,6 +189,7 @@ def test_freeze_stops_hunters():
 
 
 def test_decoy_redirects_hunters():
+    """While a decoy is active the hunters chase the decoy cell instead of the player."""
     w = World(seed=7)
     skip_intro(w)
     w.decoy_timer, w.decoy_cell = 3.0, w.arena.corners[0]
@@ -169,6 +197,7 @@ def test_decoy_redirects_hunters():
 
 
 def test_level_clear_advances_level():
+    """Collecting all orbs clears the level and starts the next one."""
     w = World(seed=8)
     skip_intro(w)
     w.hunters = []
@@ -181,6 +210,7 @@ def test_level_clear_advances_level():
 
 
 def test_levels_unlock_each_brain():
+    """Each level uses the intended AI brains and the Gauntlet speeds up (with a cap)."""
     ids = [tuple(C.level_config(n).brains) for n in range(1, 8)]
     assert ids[0] == ("wanderer",) and ids[1] == ("greedy",)
     assert ids[2] == ("astar",) and ids[3] == ("mindreader",)
@@ -193,7 +223,13 @@ def test_levels_unlock_each_brain():
 
 @pytest.mark.parametrize("level", [1, 2, 3, 4, 5, 6, 7, 9])
 def test_long_random_play_never_crashes(level):
-    """Fuzz test: random input for a minute of game time on every level."""
+    """Fuzz test: random input for a minute of game time on every level.
+
+    Checks that nothing crashes and nobody ever stands inside a wall.
+
+    Args:
+        level: level number to play (1-7 and 9).
+    """
     rng = random.Random(level)
     w = World(seed=level)
     w.start_level(level)

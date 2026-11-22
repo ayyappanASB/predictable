@@ -32,7 +32,13 @@ CARD_BRAIN = CARD_MODEL = CARD_ACC = (0, 0, 0, 0)
 
 
 def apply_layout(name: str):
-    """Switch every screen-position constant to the given layout."""
+    """Switch every screen-position constant to the given layout.
+
+    Args:
+        name: "desktop" (1000x620, keyboard), "landscape" (1000x684, phone held
+            sideways with a touch bar) or "portrait" (720x1280 with a D-pad).
+            Unknown names fall back to "desktop".
+    """
     global LAYOUT, TOUCH, PORTRAIT, WIDTH, HEIGHT, ARENA_X, ARENA_Y
     global CARD_BRAIN, CARD_MODEL, CARD_ACC
     if name not in LAYOUTS:
@@ -157,7 +163,16 @@ LEVELS = (
 
 
 def level_config(n: int) -> Level:
-    """Return the level settings. After the Mirror, endless levels keep getting faster."""
+    """Return the settings for level `n`.
+
+    Args:
+        n: level number, starting at 1.
+
+    Returns:
+        The Level tuple (name, AI label, description, hunter brains, orbs to
+        collect, hunter step time). After the Mirror (level 6) the endless
+        Gauntlet levels keep getting faster.
+    """
     if n <= len(LEVELS):
         return LEVELS[n - 1]
     step = max(0.15, 0.19 - 0.01 * (n - len(LEVELS) - 1))

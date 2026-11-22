@@ -36,19 +36,54 @@ VEC = {(1, 0): "R", (-1, 0): "L", (0, 1): "D", (0, -1): "U"}
 
 # ------------------------------------------------------------------ bots
 def random_bot(arena, cell, last, rng):
+    """Simulated player that picks a random valid move every step.
+
+    Args:
+        arena: the Arena the bot is walking in.
+        cell: the bot's current cell.
+        last: the bot's previous move (None at the start).
+        rng: random.Random for random choices.
+
+    Returns:
+        The chosen move.
+    """
     return rng.choice(arena.moves(cell))
 
 
 def straight_bot(arena, cell, last, rng):
+    """Simulated player that keeps going straight and turns randomly at walls.
+
+    Args:
+        arena: the Arena the bot is walking in.
+        cell: the bot's current cell.
+        last: the bot's previous move (None at the start).
+        rng: random.Random for random choices.
+
+    Returns:
+        The chosen move.
+    """
     moves = arena.moves(cell)
     return last if last in moves else rng.choice(moves)
 
 
 def pattern_bot_factory():
+    """Create a simulated player that repeats a fixed loop of moves (RRRDDLLLUU).
+
+    Returns:
+        A bot function with its own position in the pattern.
+    """
     pattern = "RRRDDLLLUU"
     state = {"i": 0}
 
     def bot(arena, cell, last, rng):
+        """Next move of the looping pattern, or a random move if a wall blocks it.
+
+        Args:
+            arena: the Arena the bot is walking in.
+            cell: the bot's current cell.
+            last: the bot's previous move (None at the start).
+            rng: random.Random for random choices.
+        """
         moves = arena.moves(cell)
         want = pattern[state["i"] % len(pattern)]
         state["i"] += 1
@@ -57,10 +92,22 @@ def pattern_bot_factory():
 
 
 def orb_seeker_factory():
-    """Walks shortest paths to random targets - like a player chasing orbs."""
+    """Create a simulated player that walks shortest paths to random targets - like a player chasing orbs.
+
+    Returns:
+        A bot function that remembers its current target.
+    """
     state = {"target": None}
 
     def bot(arena, cell, last, rng):
+        """First step of the A* path to the current target (a new target when reached).
+
+        Args:
+            arena: the Arena the bot is walking in.
+            cell: the bot's current cell.
+            last: the bot's previous move (None at the start).
+            rng: random.Random for random choices.
+        """
         if state["target"] in (None, cell):
             state["target"] = rng.choice(arena.free_cells())
         path = astar(cell, state["target"], arena.neighbors).path
@@ -72,6 +119,16 @@ def orb_seeker_factory():
 
 
 def experiment_predictability(steps=1500, seeds=5):
+    """Experiment 1: how well the Markov model predicts different movement styles.
+
+    Args:
+        steps: moves each simulated player makes per trial.
+        seeds: number of trials (different arenas) per player type.
+
+    Returns:
+        (curves, finals): accuracy per 100-move window for the learning-curve
+        chart, and (mean, sd) accuracy over the last 500 moves per player type.
+    """
     bots = {
         "Random mover": lambda: random_bot,
         "Straight-line mover": lambda: straight_bot,
@@ -104,11 +161,24 @@ def experiment_predictability(steps=1500, seeds=5):
 
 # --------------------------------------------------------- hunter benchmark
 def evasive_direction(world):
-    """A* to the orb where cells near a hunter are very expensive."""
+    """Steering for the benchmark bot: A* to the orb where cells near a hunter are very expensive.
+
+    Args:
+        world: the World being simulated.
+
+    Returns:
+        The direction to steer this frame.
+    """
     arena, p = world.arena, world.player.cell
     hunters = [h.cell for h in world.hunters]
 
     def cost(a, b):
+        """Step cost into cell `b`: 1, plus a penalty the closer `b` is to a hunter.
+
+        Args:
+            a: the cell being left (unused, required by astar).
+            b: the cell being entered.
+        """
         d = min((manhattan(b, h) for h in hunters), default=99)
         return 1 + (40 if d <= 1 else 12 if d == 2 else 3 if d == 3 else 0)
 
@@ -121,6 +191,17 @@ def evasive_direction(world):
 
 
 def play_trial(brain_ids, seed, step_time=0.18, limit=60.0):
+    """One benchmark game: the evasive bot against the given hunters, at equal speed.
+
+    Args:
+        brain_ids: hunter brain ids to put in the arena, e.g. ("mindreader",).
+        seed: random seed for the arena and spawns.
+        step_time: seconds per cell for the hunters.
+        limit: maximum game length in seconds.
+
+    Returns:
+        (survival time in seconds, orbs collected, True if caught).
+    """
     world = World(seed=seed)
     world.start_level(3)
     world.hunters = world.hunters[:1]
@@ -141,6 +222,14 @@ def play_trial(brain_ids, seed, step_time=0.18, limit=60.0):
 
 
 def experiment_hunters(trials=30):
+    """Experiment 2: compare every hunter brain against the same evasive bot.
+
+    Args:
+        trials: games per brain (each with a different seed).
+
+    Returns:
+        Dict brain name -> mean survival, its SD and SE, mean orbs and catch rate.
+    """
     lineup = {
         "Random walk": ("wanderer",),
         "Greedy": ("greedy",),
@@ -166,6 +255,13 @@ def experiment_hunters(trials=30):
 
 # ------------------------------------------------------------------ output
 def save(curves, finals, hunters):
+    """Write both experiments to CSV files and draw the charts with matplotlib.
+
+    Args:
+        curves: learning curves from experiment_predictability().
+        finals: final accuracies from experiment_predictability().
+        hunters: results from experiment_hunters().
+    """
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, "predictability.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
@@ -220,6 +316,7 @@ def save(curves, finals, hunters):
 
 
 def main():
+    """Run both experiments, print a summary and save the results to results/."""
     print("Experiment 1: predictability of movement styles")
     curves, finals = experiment_predictability()
     for k, (m, s) in finals.items():

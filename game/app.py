@@ -40,6 +40,7 @@ SLOW_WORK = 0.014            # avg CPU time per frame above which we lighten the
 
 
 def _url_flag(name: str) -> bool:
+    """True if `name` appears in the page URL's query string (browser only), e.g. "debug_input"."""
     if sys.platform != "emscripten":
         return False
     try:
@@ -83,7 +84,13 @@ def detect_layout() -> str:
 
 
 def web_scale() -> float:
-    """Browser: draw at the device's real pixel density (capped for speed)."""
+    """Browser: draw at the device's real pixel density (capped at 1.5x for speed).
+
+    A `?scale=` value in the URL overrides it.
+
+    Returns:
+        Scale factor between 1.0 and 1.5 (up to 3.0 when forced).
+    """
     try:
         import platform as web
         win = web.window
@@ -103,6 +110,13 @@ class App:
     TITLE = "PREDICTABLE - It learns how you move"
 
     def __init__(self, layout=None, scale=None):
+        """Open the window, load sounds and the save file, and show the title screen.
+
+        Args:
+            layout: "desktop", "landscape" or "portrait"; None detects it from the device.
+            scale: fixed drawing scale (used by tests and screenshots); None picks
+                the best resolution for the display.
+        """
         C.apply_layout(layout or detect_layout())
         pygame.init()
         self.web = sys.platform == "emscripten"
@@ -141,6 +155,9 @@ class App:
         surface is gfx.SCALE times larger so text and shapes are drawn at the
         display's real resolution (e.g. 2x on a Retina Mac) instead of being
         stretched and blurred.
+
+        Args:
+            scale: fixed scale to use, or None to choose automatically.
         """
         headless = os.environ.get("SDL_VIDEODRIVER") == "dummy"
         if scale is not None or headless:
@@ -164,6 +181,11 @@ class App:
             pygame.display.set_caption(self.TITLE)
 
     def _open_hidpi_window(self):
+        """Open a high-DPI desktop window drawn through a GPU texture (sharp on Retina).
+
+        The window is sized to fit the desktop and snapped to the game's aspect
+        ratio so every drawn pixel maps 1:1 to a screen pixel.
+        """
         from pygame._sdl2 import video
         try:
             dw, dh = pygame.display.get_desktop_sizes()[0]
@@ -187,7 +209,11 @@ class App:
         self.texture = video.Texture(self.gpu, size, streaming=True)
 
     def rescale(self, new_scale):
-        """Change the drawing resolution while running (used to keep slow devices smooth)."""
+        """Change the drawing resolution while running (used to keep slow devices smooth).
+
+        Args:
+            new_scale: the new drawing scale (logical -> real pixels).
+        """
         gfx.set_scale(new_scale)
         size = (round(C.WIDTH * gfx.SCALE), round(C.HEIGHT * gfx.SCALE))
         if self.gpu is not None:
@@ -200,6 +226,7 @@ class App:
         self.renderer.set_screen(self.screen)
 
     def present(self):
+        """Show the finished frame (flip the display, or upload the texture in high-DPI mode)."""
         if self.gpu is None:
             pygame.display.flip()
             return
@@ -211,10 +238,12 @@ class App:
 
     @staticmethod
     def to_logical(pos):
+        """Convert a screen position `pos` in real pixels to logical game pixels."""
         return (pos[0] / gfx.SCALE, pos[1] / gfx.SCALE)
 
     # ------------------------------------------------------------ actions
     def start_run(self):
+        """Start a new run with a fresh World that shares the long-term predictor."""
         self.world = World(predictor=self.predictor)
         self.renderer.effects.clear()
         self.renderer.trail.clear()
@@ -225,6 +254,7 @@ class App:
         self.audio.music("music_a")
 
     def finish_run(self):
+        """Store the run's summary, classify the player type, update the best score and save."""
         self.summary = self.world.summary()
         s = self.summary
         s["type"] = profile.classify(s)
@@ -241,23 +271,33 @@ class App:
         self.over_timer = OVER_INPUT_DELAY
 
     def to_title(self):
+        """Stop the music and go back to the title screen."""
         self.audio.music(None)
         self.state = "title"
         self.world = None
         self.release_all()
 
     def pause(self):
+        """Pause the game (only while playing)."""
         if self.state == "play":
             self.state = "paused"
             self.release_all()
 
     def release_all(self):
+        """Forget every held key, D-pad button and swipe (e.g. after pausing)."""
         self.held.clear()
         self.pad.clear()
         self.swipes.clear()
 
     def do_action(self, action, pid):
-        """Handle a tap on an on-screen button."""
+        """Handle a tap on an on-screen button.
+
+        Args:
+            action: the button's action, e.g. "dir:U", "vision", "sound", "pause",
+                "resume", "menu" or "again".
+            pid: pointer id ("mouse" or a finger id), so held D-pad buttons are
+                tracked per finger.
+        """
         if action.startswith("dir:"):
             if self.state == "play":
                 self.pad[pid] = action[4:]
@@ -277,6 +317,12 @@ class App:
 
     # ------------------------------------------------------------ pointers
     def pointer_down(self, pos, pid):
+        """A mouse button or finger went down: press a button, start the game, skip the kill-cam or begin a swipe.
+
+        Args:
+            pos: (x, y) in logical pixels.
+            pid: pointer id ("mouse" or a finger id).
+        """
         action = self.renderer.button_at(pos)
         if self.state == "over" and self.over_timer > 0:
             return
@@ -296,6 +342,12 @@ class App:
                 self.swipes[pid] = pos
 
     def pointer_move(self, pos, pid):
+        """A pointer moved: turn the player when a swipe travels far enough.
+
+        Args:
+            pos: (x, y) in logical pixels.
+            pid: pointer id ("mouse" or a finger id).
+        """
         anchor = self.swipes.get(pid)
         if anchor is None or self.state != "play":
             return
@@ -308,14 +360,32 @@ class App:
             self.swipes[pid] = pos     # keep swiping in one stroke to chain turns
 
     def pointer_up(self, pid):
+        """A pointer was released: end its swipe and release its D-pad button.
+
+        Args:
+            pid: pointer id ("mouse" or a finger id).
+        """
         self.swipes.pop(pid, None)
         self.pad.pop(pid, None)
 
     def finger_pos(self, event):
+        """Convert a finger event's normalised 0..1 position to logical pixels.
+
+        Args:
+            event: a pygame FINGERDOWN / FINGERMOTION event.
+        """
         return (event.x * C.WIDTH, event.y * C.HEIGHT)
 
     # -------------------------------------------------------------- input
     def handle(self, event):
+        """Route one pygame event to the keyboard, mouse or touch handlers.
+
+        Touches normally arrive as emulated mouse events; raw finger events are
+        only used if no mouse event follows, so a tap is never counted twice.
+
+        Args:
+            event: the pygame event.
+        """
         t = event.type
         if self.debug_input and t in (pygame.MOUSEBUTTONDOWN, getattr(pygame, "FINGERDOWN", -1)):
             info = dict(getattr(event, "__dict__", {}))
@@ -359,6 +429,7 @@ class App:
             self.pause()
 
     def check_finger_fallback(self):
+        """If a finger tap was not followed by a mouse event in time, handle the finger instead."""
         if self.finger_pending and time.monotonic() - self.finger_pending[0] > FINGER_FALLBACK:
             _, pos, pid = self.finger_pending
             self.finger_pending = None
@@ -366,6 +437,11 @@ class App:
             self.pointer_down(pos, pid)
 
     def on_key(self, key):
+        """Handle a key press for the current screen (title, play, pause or game over).
+
+        Args:
+            key: the pygame key code.
+        """
         if key == pygame.K_m:
             self.audio.toggle()
             return
@@ -400,11 +476,13 @@ class App:
                 self.to_title()
 
     def can_skip_killcam(self):
+        """True if the death animation or kill-cam is playing long enough to be skipped."""
         w = self.world
         return w is not None and (w.phase == "dead" or
                                   (w.phase == "killcam" and w.phase_timer < C.KILLCAM_TIME - 0.5))
 
     def held_direction(self):
+        """The direction currently held (latest key, else D-pad button), or None."""
         if self.held:
             return self.held[-1]
         if self.pad:
@@ -412,6 +490,11 @@ class App:
         return None
 
     def on_world_events(self, events):
+        """Play the sound for each world event and switch music between levels.
+
+        Args:
+            events: list of event tuples from World.pop_events().
+        """
         for ev in events:
             sound = EVENT_SOUNDS.get(ev[0])
             if sound:
@@ -422,7 +505,11 @@ class App:
                 self.audio.music(None)
 
     def heartbeat(self, dt):
-        """Thump faster and louder the closer the nearest hunter is."""
+        """Thump faster and louder the closer the nearest hunter is.
+
+        Args:
+            dt: seconds since the last frame.
+        """
         danger = self.world.danger if self.world.phase == "play" else 0.0
         if danger < 0.05:
             self.heartbeat_timer = 0.0
@@ -434,7 +521,13 @@ class App:
 
     def watch_performance(self, work):
         """Slow device (e.g. an older phone)? First lower the resolution step by step,
-        then switch to cheaper effects. `work` is the CPU time the last frame took."""
+        then switch to cheaper effects.
+
+        Only normal gameplay frames are measured, averaged over 120 frames.
+
+        Args:
+            work: CPU time in seconds that the last frame took to update and draw.
+        """
         if self.renderer.low_quality or self.state != "play" or self.world.phase != "play":
             return                       # only judge normal gameplay, not short replays/banners
         self.frame_times.append(work)
@@ -450,6 +543,7 @@ class App:
 
     # -------------------------------------------------------------- frame
     def frame(self):
+        """Run one frame: read input, update the current screen, draw it and check performance."""
         raw_dt = self.clock.tick(C.FPS) / 1000.0
         work_start = time.perf_counter()
         dt = min(raw_dt, 0.05)
@@ -495,4 +589,5 @@ class App:
         self.watch_performance(work)
 
     def quit(self):
+        """Shut down pygame."""
         pygame.quit()

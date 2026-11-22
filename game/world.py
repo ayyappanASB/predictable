@@ -22,6 +22,14 @@ from .grid import generate_arena
 
 class World:
     def __init__(self, seed=None, predictor=None):
+        """Start a new run at level 1.
+
+        Args:
+            seed: optional random seed; the same seed gives the same arenas and
+                spawns (used by tests, experiments and screenshots).
+            predictor: an existing MarkovPredictor to keep learning across runs;
+                None creates a fresh one.
+        """
         self.rng = random.Random(seed)
         self.predictor = predictor or MarkovPredictor(order=C.PREDICT_ORDER)
         self.predictor.new_run()
@@ -46,6 +54,11 @@ class World:
 
     # ---------------------------------------------------------------- levels
     def start_level(self, number: int):
+        """Build level `number`: a new arena, hunters with that level's brains, and the first orb.
+
+        Args:
+            number: level number (1-6 are the named levels, 7+ is the Gauntlet).
+        """
         self.level_no = number
         self.level = C.level_config(number)
         self.arena = generate_arena(C.COLS, C.ROWS, self.rng)
@@ -84,20 +97,25 @@ class World:
     # --------------------------------------------------------------- helpers
     @property
     def decoy_active(self) -> bool:
+        """True while a decoy is drawing the hunters away from the player."""
         return self.decoy_timer > 0 and self.decoy_cell is not None
 
     @property
     def frozen(self) -> bool:
+        """True while the Freeze power-up stops the hunters."""
         return self.freeze_timer > 0
 
     @property
     def confused(self) -> bool:
+        """True while a full CHAOS meter has the hunters moving randomly."""
         return self.confuse_timer > 0
 
     def hunter_goal(self):
+        """Cell the hunters chase: the decoy if one is active, otherwise the player."""
         return self.decoy_cell if self.decoy_active else self.player.cell
 
     def occupied(self):
+        """Cells currently taken by the player, hunters, orb or power-up."""
         cells = {self.player.cell}
         cells.update(h.cell for h in self.hunters)
         if self.orb:
@@ -107,6 +125,16 @@ class World:
         return cells
 
     def _pick_cell(self, min_player: int, max_player: int, min_hunter: int):
+        """Pick a random free cell for a spawn, at a fair distance from everyone.
+
+        Args:
+            min_player: minimum BFS distance from the player.
+            max_player: maximum BFS distance from the player.
+            min_hunter: minimum BFS distance from every hunter.
+
+        Returns:
+            A suitable cell, any free cell if none fits, or None if the arena is full.
+        """
         dist = self.arena.distances(self.player.cell)
         hunter_d = [self.arena.distances(h.cell) for h in self.hunters]
         taken = self.occupied()
@@ -121,10 +149,12 @@ class World:
         return self.rng.choice(pool) if pool else None
 
     def spawn_orb(self):
+        """Place the next orb a reachable distance away from the player and hunters."""
         cell = self._pick_cell(4, 12, 3)
         self.orb = Orb(cell) if cell else None
 
     def spawn_powerup(self):
+        """Place a random power-up (no Shield while one is already held)."""
         kinds = [k for k in PowerUp.KINDS if not (k == "shield" and self.shield)]
         cell = self._pick_cell(4, 10, 3)
         if cell:
@@ -132,11 +162,21 @@ class World:
             self.events.append(("powerup_spawn", cell))
 
     def farthest_corner(self):
+        """Corner furthest from the player by path distance (where a shielded hit sends the hunter)."""
         dist = self.arena.distances(self.player.cell)
         return max(self.arena.corners, key=lambda c: dist.get(c, -1))
 
     @staticmethod
     def visual_distance(a, b) -> float:
+        """Distance in cells between where two movers are drawn (not their grid cells).
+
+        Args:
+            a: first Mover.
+            b: second Mover.
+
+        Returns:
+            Euclidean distance between their smoothed on-screen positions.
+        """
         (ax, ay), (bx, by) = a.visual_cell(), b.visual_cell()
         return math.hypot(ax - bx, ay - by)
 
@@ -152,6 +192,15 @@ class World:
                    key=lambda i: manhattan(self.hunters[i].cell, self.player.cell))
 
     def say(self, kind, force=False, hunter=None, text=None, **fmt):
+        """Make a hunter say a taunt (a speech bubble), respecting the cooldown.
+
+        Args:
+            kind: taunt category in taunts.LINES, e.g. "called_it" or "surprise".
+            force: True to ignore the cooldown (important moments).
+            hunter: index of the hunter that speaks; None picks speaker().
+            text: exact text to say instead of a random line of `kind`.
+            **fmt: values filled into the line, e.g. move="LEFT".
+        """
         if not force and self.taunt_cooldown > 0:
             return
         idx = self.speaker() if hunter is None else hunter
@@ -162,16 +211,31 @@ class World:
 
     # ---------------------------------------------------------------- input
     def steer(self, direction):
+        """Buffer a turn for the player.
+
+        Args:
+            direction: "U", "R", "D" or "L"; anything else is ignored.
+        """
         if direction in C.DIRS:
             self.player.queue(direction)
 
     def skip_killcam(self):
+        """Jump straight to the game-over card when the player skips the replay."""
         if self.phase in ("dead", "killcam"):
             self.phase = "over"
             self.events.append(("game_over", None))
 
     # --------------------------------------------------------------- update
     def update(self, dt: float):
+        """Advance the whole simulation by one frame.
+
+        Runs the phase machine (intro, play, clear, dead, killcam, over); in the
+        play phase it moves the player and hunters, checks catches, close calls and
+        level completion.
+
+        Args:
+            dt: seconds since the last frame (capped at 0.05 s to avoid jumps).
+        """
         dt = min(dt, 0.05)                      # avoid huge jumps after a lag spike
         if self.slowmo > 0:
             self.slowmo -= dt
@@ -224,11 +288,17 @@ class World:
             self.events.append(("level_clear", self.level_no))
 
     def _opener(self):
+        """Have the level's hunter introduce itself when play starts."""
         idx = self.speaker()
         if idx is not None:
             self.say("opener_" + self.hunters[idx].brain.id, force=True, hunter=idx)
 
     def _tick_timers(self, dt):
+        """Count down every timer: combo, power-ups, freeze, decoy, confusion and cooldowns.
+
+        Args:
+            dt: seconds since the last frame.
+        """
         self.time_alive += dt
         self.close_cooldown = max(0.0, self.close_cooldown - dt)
         self.surprise_cooldown = max(0.0, self.surprise_cooldown - dt)
@@ -261,6 +331,14 @@ class World:
 
     # ------------------------------------------------- player-move reactions
     def _on_player_step(self, move, valid):
+        """React to one player move: train the model, collect items and check for surprises.
+
+        Only junctions (3+ exits) count as real decisions for taunts and surprises.
+
+        Args:
+            move: the direction the player just moved.
+            valid: the directions that were possible from that cell.
+        """
         previous = self.predictor.history[-1] if self.predictor.history else None
         guess, confidence = self.predictor.observe(move, valid)
         self.player_path.append(self.player.cell)
@@ -281,6 +359,7 @@ class World:
                 self._surprise()
 
     def _surprise(self):
+        """Reward the player for beating a confident prediction (+points, fills CHAOS)."""
         self.surprise_cooldown = C.SURPRISE_COOLDOWN
         self.surprises += 1
         self.score += C.SURPRISE_POINTS
@@ -297,6 +376,7 @@ class World:
             self.say("surprise")
 
     def _collect(self):
+        """Pick up an orb or power-up on the player's cell and apply its effect."""
         cell = self.player.cell
         if self.orb and self.orb.cell == cell:
             self.combo = min(C.MAX_COMBO, self.combo + 1) if self.combo_timer > 0 else 1
@@ -327,7 +407,13 @@ class World:
 
     # ------------------------------------------------------------- contact
     def _check_caught(self) -> bool:
-        """Caught when the sprites actually touch (fair: what you see is what counts)."""
+        """Caught when the sprites actually touch (fair: what you see is what counts).
+
+        A Shield absorbs one catch and sends that hunter to the far corner.
+
+        Returns:
+            True if the player died this frame.
+        """
         for idx, h in enumerate(self.hunters):
             if self.visual_distance(h, self.player) > C.CATCH_DISTANCE:
                 continue
@@ -343,6 +429,11 @@ class World:
         return False
 
     def _die(self, idx):
+        """End the run: switch to the death phase and prepare the kill-cam.
+
+        Args:
+            idx: index of the hunter that caught the player.
+        """
         h = self.hunters[idx]
         self.phase = "dead"
         self.phase_timer = C.DEATH_TIME
@@ -352,6 +443,15 @@ class World:
         self.say("gotcha", force=True, hunter=idx, text=self.killcam["quote"])
 
     def _build_killcam(self, h):
+        """Collect everything the kill-cam replay needs.
+
+        Args:
+            h: the Hunter that caught the player.
+
+        Returns:
+            Dict with the player's recent path, the forecast that predicted the
+            catch, a caption explaining which AI did it and the hunter's quote.
+        """
         p = self.player
         seen = h.seen.get(p.cell) or h.seen.get(p.prev)
         forecast, moves_ago = [], 0
@@ -391,11 +491,17 @@ class World:
         }
 
     def _update_danger(self, dt):
+        """Ease the danger level (0..1) towards how close the nearest hunter is (drives heartbeat and vignette).
+
+        Args:
+            dt: seconds since the last frame.
+        """
         nearest = min((self.visual_distance(h, self.player) for h in self.hunters), default=99)
         target = 0.0 if self.frozen else max(0.0, min(1.0, (4.0 - nearest) / 3.0))
         self.danger += (target - self.danger) * min(1.0, dt * 8)
 
     def _check_close_calls(self):
+        """Award a close call when a hunter was next to the player and the player escaped."""
         for h in self.hunters:
             d = manhattan(h.cell, self.player.cell)
             if d <= 1:
@@ -412,10 +518,17 @@ class World:
 
     # ------------------------------------------------------------ reporting
     def pop_events(self):
+        """Return and clear this frame's events (for sounds, particles and speech bubbles)."""
         events, self.events = self.events, []
         return events
 
     def summary(self) -> dict:
+        """Statistics for the game-over card and player-type classification.
+
+        Returns:
+            Dict with score, time, orbs, level, the model's accuracy, move counts,
+            straight-line ratio, favourite turn, combo, close calls and surprises.
+        """
         p = self.predictor
         return {
             "score": self.score,
