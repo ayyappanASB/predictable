@@ -14,7 +14,7 @@ PAGES = (
     {"art": "controls", "accent": C.PLAYER, "title": "CONTROLS",
      "body": "Move with the arrow keys or WASD, or swipe anywhere / use the D-pad on a phone. "
              "Press a turn early and you take it at the next junction. "
-             "V = AI Vision, P = pause, M = sound, H = this guide."},
+             "V = AI Vision, P = pause, M = sound, H = this guide, F = support."},
     {"art": "levels", "accent": C.HUNTER, "title": "THE HUNTERS GET SMARTER",
      "body": "Every level brings a smarter AI: a random wanderer, a greedy chaser, A* pathfinding, "
              "a Mind Reader that predicts your next moves, a team of two, and the Mirror that moves like you."},

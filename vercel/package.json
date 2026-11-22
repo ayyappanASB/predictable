@@ -1,0 +1,10 @@
+{
+  "name": "predictable-web",
+  "private": true,
+  "description": "PREDICTABLE on Vercel: the static WebAssembly game plus the feedback API",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@vercel/blob": "^2.0.0"
+  }
+}

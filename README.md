@@ -28,6 +28,7 @@ Mirror: https://ayyappanasb.github.io/predictable/ (same build, hosted on GitHub
 | P / Esc | Pause |
 | M | Sound on/off |
 | H (or the **ⓘ** button) | **How to play** guide: 7 illustrated pages, browse with ← / → or swipe |
+| F (or the **headset** button, top-left) | **Support**: send a bug report, idea or praise (name, email, message) |
 
 **On phones** the game picks a touch layout automatically:
 
@@ -169,6 +170,25 @@ The web build is a static site (an `index.html` plus the game package), so any s
   newest build) into a folder named `predictable`, then run `vercel deploy --prod` there.
 * **GitHub Pages (mirror):** https://ayyappanasb.github.io/predictable/ - the same files are
   pushed to the `gh-pages` branch.
+
+## Support and feedback
+
+Players can report a problem from inside the game (headset button on the title screen, SUPPORT in
+the pause menu, or F). The flow:
+
+1. **Form** (`vercel/support.html`): name, email, type (bug / idea / praise / other) and message,
+   with game details (layout, level, score) attached automatically. In the browser it opens as a
+   pop-up over the game; the desktop app opens it in the default browser.
+2. **API** (`vercel/api/feedback.js`, a Vercel serverless function): validates every field, rejects
+   bots (hidden honeypot field), oversized requests and floods (5 reports per address per 10
+   minutes), then saves the report as a **private** JSON file in a Vercel Blob store (London region).
+   Nobody can read it without the owner's secret token.
+3. **Mac sync** (`vercel/sync-feedback.mjs`): downloads new reports into
+   `~/Documents/PREDICTABLE Feedback/` (one JSON per report + `feedback.csv` for Numbers/Excel) and
+   shows a macOS notification. `bash vercel/install-autosync.sh` runs it every 5 minutes
+   (`--remove` turns it off). The token lives in `~/.predictable/feedback.env` (mode 600), never in git.
+
+Backend tests: `cd vercel && npm install && node --test tests/`.
 
 ## Assets
 

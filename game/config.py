@@ -10,6 +10,9 @@ from dataclasses import dataclass
 AUTHOR = "Balasubramanian Ayyappan"
 STUDENT_ID = "3073JDDJ"
 
+# Support / feedback form (hosted on Vercel; reports are stored privately and synced to the Mac)
+SUPPORT_URL = "https://predictable-pi.vercel.app/support"
+
 # --------------------------------------------------------------------------
 # Screen layout (logical pixels; the web build scales the canvas to fit)
 # --------------------------------------------------------------------------

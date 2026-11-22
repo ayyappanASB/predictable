@@ -3,13 +3,16 @@
 States:  title -> play <-> paused -> over -> play ...
 
 Input works the same way on every device:
-  * keyboard (arrows / WASD, V, P, M, H, Space, Esc)
+  * keyboard (arrows / WASD, V, P, M, H, F, Space, Esc)
   * mouse or touch: swipe anywhere to steer, on-screen D-pad and buttons on phones
 """
 
+import json
 import os
 import sys
 import time
+import urllib.parse
+import webbrowser
 
 import pygame
 
@@ -132,6 +135,7 @@ class App:
         self.state = "title"
         self.guide_page = None       # page of the "How to play" guide, None when it is closed
         self.guide_swipe = None      # pointer position where a swipe on the guide started
+        self.support_opened = 0      # how many times the support form was opened (for tests)
         self.held = []               # keyboard directions held, most recent last
         self.pad = {}                # pointer id -> D-pad direction held
         self.swipes = {}             # pointer id -> last swipe anchor position
@@ -318,6 +322,8 @@ class App:
             self.start_run()
         elif action == "guide":
             self.open_guide()
+        elif action == "support":
+            self.open_support()
         elif action == "guide_close":
             self.close_guide()
         elif action == "guide_next":
@@ -337,6 +343,40 @@ class App:
         self.guide_page = 0
         self.guide_swipe = None
         self.audio.play("click")
+
+    def support_context(self):
+        """Game details attached to a support report so problems can be reproduced.
+
+        Returns:
+            JSON text with the layout, screen, level, score and resolution.
+        """
+        w = self.world
+        ctx = {"layout": C.LAYOUT, "state": self.state, "scale": round(gfx.SCALE, 2),
+               "runs": len(self.save["runs"]), "best": self.save["best"], "version": "web" if self.web else "desktop"}
+        if w is not None:
+            ctx.update(level=w.level_no, score=w.score)
+        return json.dumps(ctx)
+
+    def open_support(self):
+        """Open the support / feedback form (pausing the game if it is running).
+
+        In the browser it appears as a pop-up over the game; the desktop app opens
+        the same form in the default web browser.
+        """
+        if self.state == "play":
+            self.pause()
+        self.release_all()
+        self.support_opened += 1
+        ctx = self.support_context()
+        self.audio.play("click")
+        try:
+            if self.web:
+                import platform as web                 # pygbag's bridge to the browser page
+                web.window.openSupport(ctx)
+            else:
+                webbrowser.open(C.SUPPORT_URL + "?ctx=" + urllib.parse.quote(ctx))
+        except Exception as exc:                        # never let a missing browser crash the game
+            print("support form could not be opened:", exc)
 
     def close_guide(self):
         """Close the guide and return to the screen underneath (the game stays paused)."""
@@ -512,6 +552,9 @@ class App:
             return
         if key == pygame.K_h or key == pygame.K_SLASH:
             self.open_guide()
+            return
+        if key == pygame.K_f:
+            self.open_support()
             return
         if key == pygame.K_v:
             self.renderer.vision = not self.renderer.vision

@@ -1232,6 +1232,10 @@ class Renderer:
             self.blit_text("NEW HERE?  HOW TO PLAY", 16, scale(C.PLAYER, blink), (ix - ir - 14, iy),
                            "midright", spacing=2)
         self.info_icon(ix, iy, ir)
+        # support button: report a problem or send feedback (top-left, mirroring the info button)
+        sx = 30 + ir
+        self.support_icon(sx, iy, ir)
+        self.blit_text("SUPPORT", 13 if not portrait else 15, C.MUTED, (sx, iy + ir + 14), "center", spacing=2)
 
     # ================================================================= guide
     def info_icon(self, cx, cy, r=22, action="guide"):
@@ -1251,6 +1255,34 @@ class Renderer:
         gfx.arc(self.screen, C.PLAYER, (cx - r, cy - r, 2 * r, 2 * r), -0.25, 2 * math.pi - 1.3, 2)
         gfx.circle(self.screen, C.TEXT, (cx, cy - r * 0.42), max(2.0, r * 0.13))
         gfx.rect(self.screen, C.TEXT, (cx - r * 0.1, cy - r * 0.18, r * 0.2, r * 0.68), border_radius=2)
+        self.buttons.append((pygame.Rect(cx - r - 6, cy - r - 6, 2 * r + 12, 2 * r + 12), action))
+
+    def support_icon(self, cx, cy, r=22, action="support"):
+        """Draw the round headset "support" button (a person with a headset) and register it.
+
+        Args:
+            cx, cy: centre in logical pixels.
+            r: radius in logical pixels.
+            action: action sent to the app when it is tapped.
+        """
+        pulse = 0.5 + 0.5 * math.sin(self.t * 3 + 1.5)
+        self.draw_glow(cx, cy, r * 2.2, C.PLAYER, round(0.12 + 0.12 * pulse, 1))
+        gfx.circle(self.screen, C.CARD_BG, (cx, cy), r)
+        gfx.circle(self.screen, C.PLAYER, (cx, cy), r, 2)
+        ink = C.TEXT
+        hx, hy, hr = cx, cy - r * 0.12, r * 0.3                     # head
+        gfx.circle(self.screen, ink, (hx, hy), hr)
+        sw, sh = r * 0.62, r * 0.34                                  # shoulders (half ellipse)
+        pts = [(cx + sw * math.cos(a), cy + r * 0.62 - sh * math.sin(a))
+               for a in [k * math.pi / 12 for k in range(13)]]
+        gfx.polygon(self.screen, ink, pts)
+        gfx.arc(self.screen, C.PLAYER, (hx - hr * 1.45, hy - hr * 1.45, hr * 2.9, hr * 2.9),
+                0.35, math.pi - 0.35, 2)                             # headband
+        for side in (-1, 1):                                         # ear cups
+            gfx.rect(self.screen, C.PLAYER, (hx + side * hr * 1.35 - r * 0.09, hy - r * 0.05, r * 0.18, r * 0.3),
+                     border_radius=2)
+        gfx.line(self.screen, C.PLAYER, (hx + hr * 1.35, hy + r * 0.24), (hx + hr * 0.35, hy + hr * 1.05), 2)
+        gfx.circle(self.screen, C.PLAYER, (hx + hr * 0.3, hy + hr * 1.05), max(1.5, r * 0.07))  # microphone
         self.buttons.append((pygame.Rect(cx - r - 6, cy - r - 6, 2 * r + 12, 2 * r + 12), action))
 
     def guide_layout(self):
@@ -1606,19 +1638,25 @@ class Renderer:
 
     # ================================================================= pause
     def draw_pause(self):
-        """Draw the pause overlay (RESUME / HOW TO PLAY / QUIT buttons on touch screens)."""
+        """Draw the pause overlay (RESUME / HOW TO PLAY / SUPPORT / QUIT buttons on touch screens)."""
         self.buttons = []
-        self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 190))
+        self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 225))
         cx, cy = C.WIDTH // 2, C.HEIGHT // 2
+        # a solid card keeps the menu readable over banners and effects underneath
+        panel = (cx - 235, cy - 115, 470, 385) if C.TOUCH else (cx - 270, cy - 110, 540, 250)
+        gfx.rect(self.screen, C.CARD_BG, panel, border_radius=22)
+        gfx.rect(self.screen, C.CARD_EDGE, panel, width=2, border_radius=22)
         self.blit_text("PAUSED", 80, C.TEXT, (cx, cy - 40), "center", spacing=8)
         if C.TOUCH:
-            self.button((cx - 130, cy + 20, 260, 64), "resume", "RESUME", True)
-            self.button((cx - 130, cy + 100, 260, 64), "guide", "HOW TO PLAY")
-            self.button((cx - 130, cy + 180, 260, 64), "menu", "QUIT TO MENU", False, C.HUNTER)
+            self.button((cx - 205, cy + 20, 410, 64), "resume", "RESUME", True)
+            self.button((cx - 205, cy + 100, 200, 64), "guide", "HOW TO PLAY")
+            self.button((cx + 5, cy + 100, 200, 64), "support", "SUPPORT")
+            self.button((cx - 205, cy + 180, 410, 64), "menu", "QUIT TO MENU", False, C.HUNTER)
         else:
-            self.blit_text("P / ESC to resume     ·     Q to quit to menu     ·     H for help", 22, C.MUTED,
+            self.blit_text("P / ESC resume   ·   Q menu   ·   H help   ·   F support", 22, C.MUTED,
                            (cx, cy + 16), "center", spacing=1)
-            self.button((cx - 110, cy + 56, 220, 50), "guide", "HOW TO PLAY")
+            self.button((cx - 230, cy + 56, 220, 50), "guide", "HOW TO PLAY")
+            self.button((cx + 10, cy + 56, 220, 50), "support", "SUPPORT")
 
     # ============================================================= game over
     def draw_game_over(self, world, dt, summary, best, new_best, history, muted,

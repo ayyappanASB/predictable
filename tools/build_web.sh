@@ -41,8 +41,51 @@ for old, new in (
     if old not in html:
         sys.exit(f"theme patch not applied, pattern missing: {old[:40]}")
     html = html.replace(old, new)
+# Support pop-up: the game calls window.openSupport(ctx) (via pygbag's JS bridge) and the
+# feedback form (support page on Vercel) opens in an iframe over the canvas. Key presses inside
+# the iframe never reach the game, so typing works on every device.
+SUPPORT = """
+<style>
+  #support-pop { position: fixed; inset: 0; z-index: 9999; display: none; place-items: center;
+    background: rgba(3, 5, 11, .82); padding: 12px; }
+  #support-pop.open { display: grid; }
+  #support-pop iframe { width: min(560px, 100%); height: min(720px, 96vh); border: 0;
+    background: transparent; color-scheme: normal; }
+</style>
+<div id="support-pop" role="dialog" aria-modal="true" aria-label="Support and feedback"></div>
+<script>
+  window.openSupport = function (ctx) {
+    var pop = document.getElementById("support-pop");
+    pop.innerHTML = "";
+    var frame = document.createElement("iframe");
+    frame.title = "Support and feedback form";
+    frame.src = "https://predictable-pi.vercel.app/support?embed=1&ctx=" + encodeURIComponent(ctx || "{}");
+    pop.appendChild(frame);
+    pop.classList.add("open");
+    setTimeout(function () { frame.focus(); }, 50);
+  };
+  window.closeSupport = function () {
+    var pop = document.getElementById("support-pop");
+    pop.classList.remove("open");
+    pop.innerHTML = "";
+    var canvas = document.getElementById("canvas");
+    if (canvas) canvas.focus();
+  };
+  window.addEventListener("message", function (e) {
+    if (e.origin === "https://predictable-pi.vercel.app" && e.data && e.data.type === "predictable-support-close") {
+      window.closeSupport();
+    }
+  });
+  document.getElementById("support-pop").addEventListener("click", function (e) {
+    if (e.target.id === "support-pop") window.closeSupport();   // click outside the form closes it
+  });
+</script>
+"""
+if "</body>" not in html:
+    sys.exit("support patch not applied: </body> missing")
+html = html.replace("</body>", SUPPORT + "</body>", 1)
 open(path, "w", encoding="utf-8").write(html)
-print("page theme applied")
+print("page theme + support pop-up applied")
 EOF
 
 # Safety check: every game file must be inside the web package.

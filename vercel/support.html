@@ -1,0 +1,180 @@
+<!doctype html>
+<!-- PREDICTABLE support / feedback form - Balasubramanian Ayyappan (3073JDDJ) -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070a14">
+<title>PREDICTABLE - Support</title>
+<style>
+  :root {
+    --bg: #070a14; --card: #0f1528; --edge: #22304e; --arena: #0c1120; --text: #e8eeff;
+    --muted: #8a96bc; --dim: #4a5478; --cyan: #40e2ff; --pink: #ff3e80; --good: #6ef0a0; --gold: #ffc450;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  html.embed, html.embed body { background: transparent; }
+  .wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  html.embed .wrap { min-height: 100vh; padding: 10px; }
+  .card { width: 100%; max-width: 520px; background: var(--card); border: 1px solid var(--edge);
+    border-radius: 20px; padding: 24px 24px 20px; position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(64,226,255,.06); }
+  .card::before { content: ""; position: absolute; left: 24px; top: -1px; width: 56px; height: 4px;
+    background: var(--cyan); border-radius: 0 0 3px 3px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+  .badge { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    background: rgba(64,226,255,.12); border: 1.5px solid var(--cyan); }
+  .kicker { font-size: 11px; letter-spacing: .22em; color: var(--muted); font-weight: 700; }
+  h1 { margin: 2px 0 0; font-size: 22px; letter-spacing: .06em; }
+  .lead { color: var(--muted); margin: 10px 0 18px; font-size: 15px; }
+  .close { position: absolute; right: 16px; top: 16px; width: 40px; height: 40px; border-radius: 50%;
+    border: 1.5px solid var(--edge); background: var(--arena); color: var(--text); font-size: 20px;
+    cursor: pointer; display: none; }
+  body.embed .close { display: block; }
+  .close:hover, .close:focus-visible { border-color: var(--cyan); outline: none; }
+  label { display: block; font-size: 12px; letter-spacing: .16em; font-weight: 700; color: var(--muted);
+    margin: 14px 0 6px; }
+  input, textarea { width: 100%; background: var(--arena); color: var(--text); border: 1.5px solid var(--edge);
+    border-radius: 12px; padding: 12px 14px; font: inherit; font-size: 16px; }
+  textarea { min-height: 120px; resize: vertical; }
+  input:focus, textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(64,226,255,.15); }
+  input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--pink); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 480px) { .row { grid-template-columns: 1fr; } .card { padding: 20px 18px 18px; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .chips label { margin: 0; padding: 9px 14px; border-radius: 999px; border: 1.5px solid var(--edge);
+    background: var(--arena); color: var(--text); letter-spacing: .08em; cursor: pointer; font-size: 13px; }
+  .chips input:checked + label { border-color: var(--cyan); background: rgba(64,226,255,.14); color: var(--cyan); }
+  .chips input:focus-visible + label { box-shadow: 0 0 0 3px rgba(64,226,255,.35); }
+  .count { text-align: right; font-size: 12px; color: var(--dim); margin-top: 4px; }
+  .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+  .error { color: var(--pink); font-size: 14px; min-height: 20px; margin: 10px 0 0; }
+  .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+  .privacy { font-size: 12px; color: var(--dim); max-width: 280px; }
+  button.send { border: 1.5px solid var(--cyan); background: rgba(64,226,255,.16); color: var(--cyan);
+    border-radius: 14px; padding: 13px 22px; font: inherit; font-weight: 700; letter-spacing: .14em;
+    cursor: pointer; min-width: 150px; }
+  button.send:hover, button.send:focus-visible { background: rgba(64,226,255,.26); outline: none; }
+  button.send[disabled] { opacity: .6; cursor: progress; }
+  .done { text-align: center; padding: 18px 4px 6px; display: none; }
+  .done .tick { width: 72px; height: 72px; border-radius: 50%; margin: 6px auto 14px; display: grid; place-items: center;
+    border: 2px solid var(--good); background: rgba(110,240,160,.12); color: var(--good); font-size: 34px; }
+  .done h2 { margin: 0 0 6px; letter-spacing: .06em; }
+  .done p { color: var(--muted); margin: 6px 0; }
+  .done code { color: var(--gold); font-size: 18px; letter-spacing: .12em; }
+  .back { display: inline-block; margin-top: 16px; color: var(--cyan); }
+  body.sent form { display: none; } body.sent .done { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main class="card" aria-labelledby="title">
+    <button class="close" type="button" aria-label="Close support" title="Close (Esc)">&times;</button>
+    <header>
+      <div class="badge" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#40e2ff" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="9" r="4.2" fill="#40e2ff" stroke="none"/><path d="M4.5 21c.8-3.6 3.9-6 7.5-6s6.7 2.4 7.5 6" fill="#40e2ff" stroke="none"/>
+          <path d="M5.5 10a6.5 6.5 0 0 1 13 0"/><rect x="3.6" y="9" width="2.6" height="4.6" rx="1.2" fill="#40e2ff"/>
+          <rect x="17.8" y="9" width="2.6" height="4.6" rx="1.2" fill="#40e2ff"/><path d="M19 13.5c0 2-1.6 3-4 3"/></svg>
+      </div>
+      <div><div class="kicker">PREDICTABLE · SUPPORT</div><h1 id="title">Tell us what happened</h1></div>
+    </header>
+    <p class="lead">Found a bug, got stuck, or have an idea? Send a report and we will get back to you by email.</p>
+
+    <form novalidate>
+      <div class="row">
+        <div><label for="name">YOUR NAME</label>
+          <input id="name" name="name" autocomplete="name" maxlength="80" required></div>
+        <div><label for="email">EMAIL</label>
+          <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required inputmode="email"></div>
+      </div>
+      <label id="cat-label">TYPE</label>
+      <div class="chips" role="radiogroup" aria-labelledby="cat-label">
+        <input type="radio" id="c-bug" name="category" value="bug" checked><label for="c-bug">BUG / ISSUE</label>
+        <input type="radio" id="c-idea" name="category" value="idea"><label for="c-idea">IDEA</label>
+        <input type="radio" id="c-praise" name="category" value="praise"><label for="c-praise">PRAISE</label>
+        <input type="radio" id="c-other" name="category" value="other"><label for="c-other">OTHER</label>
+      </div>
+      <label for="message">YOUR FEEDBACK</label>
+      <textarea id="message" name="message" maxlength="2000" required
+        placeholder="What did you expect, and what happened instead?"></textarea>
+      <div class="count" aria-live="polite"><span id="count">0</span> / 2000</div>
+      <div class="hp" aria-hidden="true"><label for="website">Leave empty</label>
+        <input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+      <p class="error" id="error" role="alert"></p>
+      <div class="actions">
+        <span class="privacy">Your name and email are only used to reply to this report. Game info (layout, level) is attached to help us fix it.</span>
+        <button class="send" type="submit">SEND</button>
+      </div>
+    </form>
+
+    <section class="done" aria-live="polite">
+      <div class="tick" aria-hidden="true">&#10003;</div>
+      <h2>Thanks, <span id="who"></span>!</h2>
+      <p>Your report has been received.</p>
+      <p>Reference: <code id="ref"></code></p>
+      <a class="back" href="/" id="back">&larr; Back to the game</a>
+    </section>
+  </main>
+</div>
+<script>
+  // Settings: the API lives on Vercel, so the form also works when opened from the GitHub Pages mirror.
+  const API = "https://predictable-pi.vercel.app/api/feedback";
+  const params = new URLSearchParams(location.search);
+  const embedded = params.get("embed") === "1";
+  let context = {};
+  try { context = JSON.parse(params.get("ctx") || "{}"); } catch (e) { context = {}; }
+  if (embedded) { document.documentElement.classList.add("embed"); document.body.classList.add("embed"); }
+
+  const form = document.querySelector("form");
+  const err = document.getElementById("error");
+  const msg = document.getElementById("message");
+  const btn = document.querySelector("button.send");
+
+  // close: tell the game page to remove the pop-up
+  function closeSupport() { parent.postMessage({ type: "predictable-support-close" }, "*"); }
+  document.querySelector(".close").addEventListener("click", closeSupport);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && embedded) closeSupport(); });
+  if (embedded) {
+    const back = document.getElementById("back");
+    back.textContent = "Back to the game";
+    back.addEventListener("click", (e) => { e.preventDefault(); closeSupport(); });
+  }
+  msg.addEventListener("input", () => { document.getElementById("count").textContent = msg.value.length; });
+
+  // show a field error and focus that field
+  function fail(field, text) {
+    err.textContent = text;
+    if (field) { field.setAttribute("aria-invalid", "true"); field.focus(); }
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    form.querySelectorAll("[aria-invalid]").forEach((el) => el.removeAttribute("aria-invalid"));
+    err.textContent = "";
+    const data = Object.fromEntries(new FormData(form));
+    // (form.name would be the form's own name, so look the fields up by id)
+    if (!data.name.trim()) return fail(document.getElementById("name"), "Please enter your name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email.trim())) return fail(document.getElementById("email"), "Please enter a valid email address.");
+    if (data.message.trim().length < 5) return fail(msg, "Please describe the issue (at least 5 characters).");
+    btn.disabled = true; btn.textContent = "SENDING...";
+    try {
+      const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...data, context: { ...context, page: embedded ? "game" : "support-page" } }) });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || !out.ok) throw new Error(out.error || "Could not send your report. Please try again.");
+      document.getElementById("who").textContent = data.name.trim().split(" ")[0];
+      document.getElementById("ref").textContent = "#" + out.id;
+      document.body.classList.add("sent");
+    } catch (ex) {
+      fail(null, ex.message === "Failed to fetch" ? "No connection - check your internet and try again." : ex.message);
+    } finally {
+      btn.disabled = false; btn.textContent = "SEND";
+    }
+  });
+  document.getElementById("name").focus();
+</script>
+</body>
+</html>
