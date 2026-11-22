@@ -11,7 +11,9 @@ every run the game tells you how predictable you were:
 
 Built for the *Artificial Intelligence Principles* mini project (2026).
 
-**▶ Play it in your browser (desktop or phone): https://ayyappanasb.github.io/predictable/**
+**▶ Play it in your browser (desktop or phone): https://predictable-pi.vercel.app/**
+
+Mirror: https://ayyappanasb.github.io/predictable/ (same build, hosted on GitHub Pages)
 
 ![gameplay](docs/screenshots/04_level4_play_vision.png)
 
@@ -156,6 +158,16 @@ python -m pytest               # run the tests
 python tools/experiment.py     # reproduce the results
 bash tools/build_web.sh        # build the web version (dist/predictable/build/web)
 ```
+
+## Publishing
+
+The web build is a static site (an `index.html` plus the game package), so any static host works.
+
+* **Vercel (main):** https://predictable-pi.vercel.app/ - copy the four files from
+  `dist/predictable/build/web` and a `vercel.json` (no-cache header, so players always get the
+  newest build) into a folder named `predictable`, then run `vercel deploy --prod` there.
+* **GitHub Pages (mirror):** https://ayyappanasb.github.io/predictable/ - the same files are
+  pushed to the `gh-pages` branch.
 
 ## Assets
 
