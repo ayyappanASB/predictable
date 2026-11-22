@@ -958,7 +958,7 @@ class Renderer:
         else:
             self.blit_text(stats + "     ·     V  AI VISION     ·     M  SOUND", 18, C.MUTED, (cx, 548),
                            "center", spacing=1)
-        self.blit_text("Artificial Intelligence Principles  ·  Mini Project 2026", 16, C.DIM,
+        self.blit_text(f"{C.AUTHOR}  ·  {C.STUDENT_ID}  ·  AI Principles Mini Project 2026", 16, C.DIM,
                        (cx, C.HEIGHT - 24), "center", spacing=1)
 
     # ================================================================= pause

@@ -1,5 +1,8 @@
 """PREDICTABLE - a chase game where the enemy learns how you move.
 
+Author:     Balasubramanian Ayyappan  (Student ID 3073JDDJ)
+Module:     5FTC2067 Artificial Intelligence Principles - Mini Project 2026
+
 Run on desktop:   python main.py
 Build for web:    pygbag .     (see README.md)
 

@@ -6,6 +6,10 @@ lets the tests and the experiment script reuse exactly the same settings.
 
 from dataclasses import dataclass
 
+# Author details (the brief asks for name + student ID on every component)
+AUTHOR = "Balasubramanian Ayyappan"
+STUDENT_ID = "3073JDDJ"
+
 # --------------------------------------------------------------------------
 # Screen layout (logical pixels; the web build scales the canvas to fit)
 # --------------------------------------------------------------------------

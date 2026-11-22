@@ -1,5 +1,7 @@
 # PREDICTABLE — *It learns how you move.*
 
+**Balasubramanian Ayyappan · Student ID 3073JDDJ** — 5FTC2067 Artificial Intelligence Principles, Mini Project 2026
+
 A neon arcade chase game written in **Python + pygame**, where the enemy is an AI
 that **learns your movement habits while you play** and uses them to cut you off.
 
