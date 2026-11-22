@@ -3,7 +3,8 @@
 //
 //   node sync-feedback.mjs            download new reports (also run every 5 min by launchd)
 //
-// Output:  ~/Documents/PREDICTABLE Feedback/
+// Output:  ~/PREDICTABLE Feedback/   (kept out of iCloud-synced Documents: iCloud can move files
+//                                     to the cloud, and background jobs cannot read them back)
 //            reports/<date>-<id>.json   one file per report (never overwritten)
 //            feedback.csv               all reports, newest first (opens in Numbers / Excel)
 // The secret read-write token is read from ~/.predictable/feedback.env (mode 600).
@@ -17,7 +18,7 @@ import { get, list } from "@vercel/blob";
 
 const HOME = os.homedir();
 const TOKEN_FILE = path.join(HOME, ".predictable", "feedback.env");
-export const OUT_DIR = process.env.PREDICTABLE_FEEDBACK_DIR || path.join(HOME, "Documents", "PREDICTABLE Feedback");
+export const OUT_DIR = process.env.PREDICTABLE_FEEDBACK_DIR || path.join(HOME, "PREDICTABLE Feedback");
 const REPORTS = path.join(OUT_DIR, "reports");
 const COLUMNS = ["received", "id", "name", "email", "category", "message", "layout", "level", "state", "page", "country", "userAgent"];
 

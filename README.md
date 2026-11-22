@@ -184,7 +184,7 @@ the pause menu, or F). The flow:
    minutes), then saves the report as a **private** JSON file in a Vercel Blob store (London region).
    Nobody can read it without the owner's secret token.
 3. **Mac sync** (`vercel/sync-feedback.mjs`): downloads new reports into
-   `~/Documents/PREDICTABLE Feedback/` (one JSON per report + `feedback.csv` for Numbers/Excel) and
+   `~/PREDICTABLE Feedback/` (outside iCloud-synced Documents) (one JSON per report + `feedback.csv` for Numbers/Excel) and
    shows a macOS notification. `bash vercel/install-autosync.sh` runs it every 5 minutes
    (`--remove` turns it off). The token lives in `~/.predictable/feedback.env` (mode 600), never in git.
 

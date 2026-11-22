@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Turn on automatic feedback sync: every 5 minutes macOS runs sync-feedback.mjs, which copies new
-# reports into ~/Documents/PREDICTABLE Feedback and shows a notification.
+# reports into ~/PREDICTABLE Feedback and shows a notification.
 #   bash install-autosync.sh            install / restart
 #   bash install-autosync.sh --remove   turn it off again
 set -euo pipefail
