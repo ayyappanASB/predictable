@@ -34,6 +34,9 @@ for old, new in (
     ("        canvas.emscripten {\n            border: 0px none;",
      "        canvas.emscripten {\n            touch-action: none;\n            outline: none;\n"
      "            border: 0px none;"),
+    # no "Are you sure you want to navigate away?" prompt when closing the tab:
+    # scores are saved after every run, so there is nothing to lose
+    ("can_close : 0,", "can_close : 1,"),
     ("background: green;\n            color: blue;",
      "background: #0f1528;\n            color: #40e2ff;\n            border: 1px solid #22304e;\n"
      "            border-radius: 12px;\n            letter-spacing: 2px;"),

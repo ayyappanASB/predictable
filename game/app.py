@@ -655,7 +655,12 @@ class App:
     # -------------------------------------------------------------- frame
     def frame(self):
         """Run one frame: read input, update the current screen, draw it and check performance."""
-        raw_dt = self.clock.tick(C.FPS) / 1000.0
+        # The native window uses the precise timer: plain tick() oversleeps on macOS and capped
+        # the game at ~54 fps. (Browsers pace frames themselves, tests use a fake clock.)
+        if self.gpu is not None and hasattr(self.clock, "tick_busy_loop"):
+            raw_dt = self.clock.tick_busy_loop(C.FPS) / 1000.0
+        else:
+            raw_dt = self.clock.tick(C.FPS) / 1000.0
         work_start = time.perf_counter()
         dt = min(raw_dt, 0.05)
         for event in pygame.event.get():

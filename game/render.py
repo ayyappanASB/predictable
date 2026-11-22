@@ -1700,7 +1700,7 @@ class Renderer:
         # redrawing it every frame made this screen ~7x slower than gameplay in the browser.
         key = (id(world), id(summary), self.screen.get_size())
         if self.over_key != key:
-            self.draw_game(world, dt, best, muted)
+            self.draw_game(world, dt, best, muted, show_hud=False)   # controls must not peek out
             self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 215))
             self.over_bg = self.screen.copy()
             self.over_key = key
