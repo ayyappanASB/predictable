@@ -71,7 +71,7 @@ def play_until_death(app, level, bot=True, limit=60 * 60):
 
 def main():
     random.seed(1)
-    app = App()
+    app = App(scale=float(os.environ.get("PREDICTABLE_SCALE", "2")))   # 2x = Retina-sharp images
     app.clock = FakeClock()
     pygame.event.set_blocked(getattr(pygame, "WINDOWFOCUSLOST", pygame.NOEVENT))
     for _ in range(40):

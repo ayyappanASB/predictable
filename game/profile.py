@@ -27,12 +27,12 @@ def classify(summary: dict) -> str:
     acc = summary.get("accuracy", 0.0)
     if acc < 0.35:
         return "gremlin"
+    if acc >= 0.75:                       # mostly predictable: that wins over everything else
+        return "habit"
     if summary.get("close_calls", 0) >= 3:
         return "daredevil"
-    if summary.get("surprises", 0) / moves >= 0.12:
+    if acc < 0.65 and summary.get("surprises", 0) / moves >= 0.12:
         return "zigzag"
-    if acc >= 0.75:
-        return "habit"
     if summary.get("straight", 0.0) >= 0.7:
         return "express"
     if summary.get("turns_total", 0) >= 5 and summary.get("favourite_share", 0.0) >= 0.4:

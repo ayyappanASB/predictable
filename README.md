@@ -78,6 +78,11 @@ movement rather than to predict it. Each move m is scored
 `log P_you(m | mirror's last moves) - 1.6 x (change in distance to you)`, so it moves the
 way you would, but towards you (a Boltzmann-style policy mixing imitation with a goal).
 
+**Sharp on every screen (`game/gfx.py`).** The game is laid out in logical pixels, but drawn
+at the display's real pixel density: about 2.6x in a Retina Mac window (via a high-DPI SDL
+window), and up to 1.5x in the browser. If a device can't keep up, it automatically steps the
+resolution down, then the effects, so phones stay smooth.
+
 **Fair collisions.** The AI plans on grid cells, but a catch only counts when the sprites
 actually touch (distance < 0.6 cells), so what you see is what counts.
 
@@ -125,12 +130,13 @@ game/
   render.py             all drawing: arena, HUD, AI panel, screens
   effects.py            particles, shake, flashes, floating text
   audio.py, storage.py  sound effects and save data (file / browser localStorage)
+  gfx.py                resolution-independent drawing (crisp on Retina and phones)
   app.py                window, input and screen state machine
   ai/
     astar.py            A* search and greedy step
     predictor.py        Markov n-gram move predictor
     brains.py           the hunter brains for each level
-tests/                  231 tests (pytest): AI, rules, features, touch controls, all 3 layouts
+tests/                  243 tests (pytest): AI, rules, features, touch, layouts, resolutions
 tools/
   experiment.py         experiments + charts for the report
   screenshots.py        renders every screen headlessly

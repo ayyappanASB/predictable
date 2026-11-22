@@ -258,6 +258,9 @@ def test_player_types():
     assert profile.classify(summary(straight=0.75)) == "express"
     assert profile.classify(summary(favourite_share=0.5)) == "loyalist"
     assert profile.classify(summary()) == "strategist"
+    # regression: a very readable player is never called a zigzagger (81% read, many surprises)
+    assert profile.classify(summary(accuracy=0.81, surprises=47, moves=390)) == "habit"
+    assert profile.classify(summary(accuracy=0.7, surprises=60)) != "zigzag"
 
 
 def test_loyalist_name_uses_turn_direction():

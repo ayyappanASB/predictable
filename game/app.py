@@ -14,7 +14,7 @@ import time
 import pygame
 
 from . import config as C
-from . import profile, storage
+from . import gfx, profile, storage
 from .ai.predictor import MarkovPredictor
 from .audio import Audio
 from .render import Renderer
@@ -34,7 +34,9 @@ EVENT_SOUNDS = {"orb": "orb", "powerup": "powerup", "close_call": "close", "deat
 SWIPE_DISTANCE = 26          # canvas pixels a finger must travel to count as a swipe
 OVER_INPUT_DELAY = 0.8       # ignore taps right after dying (you were probably still swiping)
 FINGER_FALLBACK = 0.15       # use raw finger events only if no emulated mouse event follows
-SLOW_FRAME = 1 / 38          # average frame time that switches on low-quality effects
+SLOW_WORK = 0.014            # avg CPU time per frame above which we lighten the drawing
+                             # (60 fps needs < 16.7 ms; measuring work, not frame interval,
+                             # means a throttled background tab never triggers it)
 
 
 def _url_flag(name: str) -> bool:
@@ -80,14 +82,32 @@ def detect_layout() -> str:
     return forced if forced in C.LAYOUTS else "desktop"
 
 
+def web_scale() -> float:
+    """Browser: draw at the device's real pixel density (capped for speed)."""
+    try:
+        import platform as web
+        win = web.window
+        search = str(win.location.search or "")
+        if "scale=" in search:                       # e.g. ?scale=1 to force a resolution
+            return max(1.0, min(3.0, float(search.split("scale=")[1].split("&")[0])))
+        dpr = float(win.devicePixelRatio or 1)
+        fit = min(float(win.innerWidth) / C.WIDTH, float(win.innerHeight) / C.HEIGHT)
+        # WebAssembly drawing is slower than native, so the browser starts at 1.5x at most;
+        # watch_performance() steps it down further on slow devices
+        return max(1.0, min(1.5, round(dpr * fit * 4) / 4))
+    except Exception:
+        return 1.0
+
+
 class App:
-    def __init__(self, layout=None):
+    TITLE = "PREDICTABLE - It learns how you move"
+
+    def __init__(self, layout=None, scale=None):
         C.apply_layout(layout or detect_layout())
         pygame.init()
         self.web = sys.platform == "emscripten"
-        flags = 0 if self.web else (pygame.SCALED | pygame.RESIZABLE)
-        self.screen = pygame.display.set_mode((C.WIDTH, C.HEIGHT), flags)
-        pygame.display.set_caption("PREDICTABLE - It learns how you move")
+        self.window = self.gpu = self.texture = None
+        self._open_display(scale)
         self.clock = pygame.time.Clock()
         self.renderer = Renderer(self.screen)
         self.audio = Audio()
@@ -111,6 +131,87 @@ class App:
         self.running = True
         self.debug_input = _url_flag("debug_input") or os.environ.get("PREDICTABLE_DEBUG_INPUT") == "1"
         self.last_input = ""
+        self.work_ms = 0.0
+
+    # ------------------------------------------------------------ display
+    def _open_display(self, scale):
+        """Create the screen surface at the best resolution for this device.
+
+        The game is laid out in logical pixels (C.WIDTH x C.HEIGHT); the screen
+        surface is gfx.SCALE times larger so text and shapes are drawn at the
+        display's real resolution (e.g. 2x on a Retina Mac) instead of being
+        stretched and blurred.
+        """
+        headless = os.environ.get("SDL_VIDEODRIVER") == "dummy"
+        if scale is not None or headless:
+            gfx.set_scale(scale or 1.0)
+            size = (round(C.WIDTH * gfx.SCALE), round(C.HEIGHT * gfx.SCALE))
+            self.screen = pygame.display.set_mode(size)
+            return
+        if self.web:
+            gfx.set_scale(web_scale())
+            size = (round(C.WIDTH * gfx.SCALE), round(C.HEIGHT * gfx.SCALE))
+            self.screen = pygame.display.set_mode(size)
+            pygame.display.set_caption(self.TITLE)
+            return
+        try:
+            self._open_hidpi_window()
+        except Exception:
+            # fallback: classic window, stretched by SDL
+            gfx.set_scale(1.0)
+            self.window = self.gpu = self.texture = None
+            self.screen = pygame.display.set_mode((C.WIDTH, C.HEIGHT), pygame.SCALED | pygame.RESIZABLE)
+            pygame.display.set_caption(self.TITLE)
+
+    def _open_hidpi_window(self):
+        from pygame._sdl2 import video
+        try:
+            dw, dh = pygame.display.get_desktop_sizes()[0]
+        except Exception:
+            dw, dh = C.WIDTH, C.HEIGHT
+        # open the window as large as comfortably fits the screen (in points)
+        fit = max(0.6, min(2.0, dw * 0.92 / C.WIDTH, dh * 0.86 / C.HEIGHT))
+        win_size = (round(C.WIDTH * fit), round(C.HEIGHT * fit))
+        self.window = video.Window(self.TITLE, size=win_size, resizable=True, allow_high_dpi=True)
+        # macOS may shrink the window to fit around the menu bar: use the size we really got,
+        # snapped to the game's aspect ratio, so every drawn pixel maps 1:1 to the screen
+        got_w, got_h = self.window.size
+        fit = min(got_w / C.WIDTH, got_h / C.HEIGHT)
+        self.window.size = (round(C.WIDTH * fit), round(C.HEIGHT * fit))
+        self.gpu = video.Renderer(self.window, vsync=False)
+        density = self.gpu.get_viewport().w / max(1, self.window.size[0])   # 2.0 on Retina
+        gfx.set_scale(min(3.0, fit * density))
+        size = (round(C.WIDTH * gfx.SCALE), round(C.HEIGHT * gfx.SCALE))
+        self.screen = pygame.Surface(size)
+        self.gpu.logical_size = size                      # keeps the aspect when resized
+        self.texture = video.Texture(self.gpu, size, streaming=True)
+
+    def rescale(self, new_scale):
+        """Change the drawing resolution while running (used to keep slow devices smooth)."""
+        gfx.set_scale(new_scale)
+        size = (round(C.WIDTH * gfx.SCALE), round(C.HEIGHT * gfx.SCALE))
+        if self.gpu is not None:
+            from pygame._sdl2 import video
+            self.screen = pygame.Surface(size)
+            self.gpu.logical_size = size
+            self.texture = video.Texture(self.gpu, size, streaming=True)
+        else:
+            self.screen = pygame.display.set_mode(size)
+        self.renderer.set_screen(self.screen)
+
+    def present(self):
+        if self.gpu is None:
+            pygame.display.flip()
+            return
+        self.texture.update(self.screen)
+        self.gpu.draw_color = (0, 0, 0, 255)
+        self.gpu.clear()
+        self.texture.draw()
+        self.gpu.present()
+
+    @staticmethod
+    def to_logical(pos):
+        return (pos[0] / gfx.SCALE, pos[1] / gfx.SCALE)
 
     # ------------------------------------------------------------ actions
     def start_run(self):
@@ -236,10 +337,10 @@ class App:
                 self.touch_mouse_seen = True
             self.finger_pending = None
             if not (self.finger_mode and touch_mouse):
-                self.pointer_down(event.pos, "mouse")
+                self.pointer_down(self.to_logical(event.pos), "mouse")
         elif t == pygame.MOUSEMOTION:
             if not (self.finger_mode and touch_mouse):
-                self.pointer_move(event.pos, "mouse")
+                self.pointer_move(self.to_logical(event.pos), "mouse")
         elif t == pygame.MOUSEBUTTONUP and event.button == 1:
             if not (self.finger_mode and touch_mouse):
                 self.pointer_up("mouse")
@@ -331,26 +432,30 @@ class App:
             self.audio.play("heartbeat", 0.25 + 0.6 * danger)
             self.heartbeat_timer = 0.95 - 0.5 * danger
 
-    def watch_performance(self, raw_dt):
-        """Slow device (e.g. an older phone)? Switch to cheaper effects, once."""
-        if self.renderer.low_quality or self.state != "play":
-            return
-        self.frame_times.append(raw_dt)
+    def watch_performance(self, work):
+        """Slow device (e.g. an older phone)? First lower the resolution step by step,
+        then switch to cheaper effects. `work` is the CPU time the last frame took."""
+        if self.renderer.low_quality or self.state != "play" or self.world.phase != "play":
+            return                       # only judge normal gameplay, not short replays/banners
+        self.frame_times.append(work)
         if len(self.frame_times) >= 120:
             avg = sum(self.frame_times) / len(self.frame_times)
             self.frame_times.clear()
-            if avg > SLOW_FRAME:
-                self.renderer.low_quality = True
-                self.renderer.effects.MAX_PARTICLES = 150
+            if avg > SLOW_WORK:
+                if gfx.SCALE > 1.0:
+                    self.rescale(max(1.0, gfx.SCALE - 0.5))
+                else:
+                    self.renderer.low_quality = True
+                    self.renderer.effects.MAX_PARTICLES = 150
 
     # -------------------------------------------------------------- frame
     def frame(self):
         raw_dt = self.clock.tick(C.FPS) / 1000.0
+        work_start = time.perf_counter()
         dt = min(raw_dt, 0.05)
         for event in pygame.event.get():
             self.handle(event)
         self.check_finger_fallback()
-        self.watch_performance(raw_dt)
 
         best = self.save["best"]
         muted = self.audio.muted
@@ -377,10 +482,17 @@ class App:
             self.renderer.draw_game_over(self.world, dt, self.summary, best, self.new_best,
                                          self.save["runs"], muted, self.new_type,
                                          len(self.save["types"]))
-        if self.debug_input and self.last_input:
-            for i in range(0, len(self.last_input), 60):
-                self.renderer.blit_text(self.last_input[i:i + 60], 20, (255, 255, 0), (10, 10 + i // 3))
-        pygame.display.flip()
+        if self.debug_input:
+            fps = getattr(self.clock, "get_fps", lambda: 0.0)()
+            info = (f"fps {fps:.0f}  work {self.work_ms:.1f}ms  scale {gfx.SCALE:.2f}  layout {C.LAYOUT}  "
+                    f"low-q {self.renderer.low_quality}  {self.last_input}")
+            for i in range(0, len(info), 60):
+                self.renderer.blit_text(info[i:i + 60], 20, (255, 255, 0), (10, 10 + i // 3))
+        self.present()
+        # CPU time spent on this frame (independent of browser throttling)
+        work = time.perf_counter() - work_start
+        self.work_ms += (work * 1000 - self.work_ms) * 0.05
+        self.watch_performance(work)
 
     def quit(self):
         pygame.quit()

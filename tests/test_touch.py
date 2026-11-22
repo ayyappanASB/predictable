@@ -224,14 +224,40 @@ def test_emulated_mouse_wins_over_finger(phone):
 
 
 # -------------------------------------------------------------- performance
+def slow_frames(app, n=120, work=0.03):
+    """Report n frames that each took `work` seconds of drawing."""
+    for _ in range(n):
+        app.watch_performance(work)
+
+
 def test_slow_device_switches_to_low_quality(phone):
     start_playing(phone)
-    phone.clock = FakeClock(ms=40)             # 25 fps
-    for _ in range(130):
-        phone.frame()
+    slow_frames(phone)                          # 30 ms of work per frame
     assert phone.renderer.low_quality
     for _ in range(30):                         # still draws fine
         phone.frame()
+
+
+def test_slow_device_lowers_resolution_first(tmp_path, monkeypatch):
+    from game import gfx
+    a = make_app("portrait", tmp_path, monkeypatch)
+    try:
+        a.rescale(1.5)
+        start_playing(a)
+        a.world.freeze_timer = 1e9                  # stay alive: performance is measured in play
+        slow_frames(a)
+        assert gfx.SCALE == 1.0 and not a.renderer.low_quality      # step 1: resolution
+        assert a.screen.get_size() == (C.WIDTH, C.HEIGHT)
+        for _ in range(20):
+            a.frame()
+        slow_frames(a)
+        assert a.renderer.low_quality                               # step 2: effects
+        a.world._die(0)
+        for _ in range(300):                                        # everything still draws
+            a.frame()
+    finally:
+        pygame.quit()
+        C.apply_layout("desktop")
 
 
 def test_fast_device_keeps_full_quality(phone):
@@ -255,3 +281,64 @@ def test_real_phone_event_order_gives_exactly_one_tap(phone, monkeypatch):
     monkeypatch.setattr(appmod.time, "monotonic", lambda: t0 + 1.0)
     phone.check_finger_fallback()
     assert phone.state == "paused" and not phone.finger_mode
+
+
+# ------------------------------------------------------------ high resolution
+@pytest.mark.parametrize("layout", C.LAYOUTS)
+@pytest.mark.parametrize("scale", [1.5, 2.0, 2.65])
+def test_high_resolution_rendering(layout, scale, tmp_path, monkeypatch):
+    """Retina / phone densities: the screen is bigger, the layout is identical."""
+    monkeypatch.setattr(storage, "DESKTOP_FILE", str(tmp_path / "save.json"))
+    a = App(layout=layout, scale=scale)
+    try:
+        a.clock = FakeClock()
+        assert a.screen.get_size() == (round(C.WIDTH * scale), round(C.HEIGHT * scale))
+        for _ in range(5):
+            a.frame()                            # title
+        a.start_run()
+        a.world.phase = "play"
+        a.renderer.vision = True
+        for _ in range(60):
+            a.frame()
+        a.world._die(0)
+        for _ in range(400):
+            a.frame()
+            if a.state == "over":
+                break
+        assert a.state == "over"
+        for _ in range(5):
+            a.frame()
+    finally:
+        pygame.quit()
+        C.apply_layout("desktop")
+
+
+def test_clicks_map_to_logical_coordinates_at_2x(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DESKTOP_FILE", str(tmp_path / "save.json"))
+    a = App(layout="portrait", scale=2.0)
+    try:
+        a.clock = FakeClock()
+        start_playing(a)
+        lx, ly = button_center(a, "pause")                  # logical position of the button
+        a.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(lx * 2, ly * 2), button=1))
+        assert a.state == "paused"
+    finally:
+        pygame.quit()
+        C.apply_layout("desktop")
+
+
+
+def test_throttled_tab_does_not_lower_quality(tmp_path, monkeypatch):
+    """A background tab at 25 fps but with light drawing work keeps full quality."""
+    from game import gfx
+    a = make_app("desktop", tmp_path, monkeypatch)
+    try:
+        a.rescale(1.5)
+        start_playing(a)
+        a.world.freeze_timer = 1e9
+        a.clock = FakeClock(ms=40)                 # slow frame *interval* only
+        slow_frames(a, 240, work=0.006)            # but only 6 ms of real work
+        assert gfx.SCALE == 1.5 and not a.renderer.low_quality
+    finally:
+        pygame.quit()
+        C.apply_layout("desktop")

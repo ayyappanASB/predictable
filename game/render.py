@@ -9,6 +9,7 @@ import random
 import pygame
 
 from . import config as C
+from . import gfx
 from . import profile
 from .effects import Effects
 
@@ -50,8 +51,7 @@ class Renderer:
         self.glows = {}
         self.arena_ref = None
         self.arena_surf = None
-        self.overlay = pygame.Surface((C.ARENA_W, C.ARENA_H), pygame.SRCALPHA)
-        self.shade = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
+        self.overlay = gfx.surface((C.ARENA_W, C.ARENA_H), pygame.SRCALPHA)
         self.vignette = self._make_vignette()
         self.effects = Effects()
         self.vision = False
@@ -64,16 +64,31 @@ class Renderer:
                        rng.uniform(6, 22), rng.choice((C.PLAYER, C.HUNTER, C.ORB, C.DECOY_C))]
                       for _ in range(26)]
         self.backdrop = self._make_backdrop()
+        self.static = None         # backdrop with the arena already drawn on it
+        self.tints = {}            # cached translucent rectangles
         self.title_surfs = {}
         self.buttons = []          # (rect, action) of touch buttons drawn this frame
         self.pressed_dirs = set()  # D-pad directions currently held (for highlighting)
         self.low_quality = False   # set by the app on slow devices
 
+    def set_screen(self, screen):
+        """Switch to a new screen surface (resolution change): rebuild every cached image."""
+        self.screen = screen
+        self.fonts.clear()
+        self.text_cache.clear()
+        self.glows.clear()
+        self.tints.clear()
+        self.title_surfs.clear()
+        self.overlay = gfx.surface((C.ARENA_W, C.ARENA_H), pygame.SRCALPHA)
+        self.vignette = self._make_vignette()
+        self.backdrop = self._make_backdrop()
+        self.arena_ref = self.arena_surf = self.static = None
+
     # ================================================================ basics
     def font(self, size):
         f = self.fonts.get(size)
         if f is None:
-            f = self.fonts[size] = pygame.font.Font(None, size)
+            f = self.fonts[size] = pygame.font.Font(None, max(1, round(size * gfx.SCALE)))
         return f
 
     def text_surface(self, text, size, color, spacing=0):
@@ -86,6 +101,7 @@ class Renderer:
             if spacing == 0:
                 surf = font.render(text, True, color)
             else:
+                spacing = round(spacing * gfx.SCALE)         # letter spacing in real pixels
                 glyphs = [font.render(ch, True, color) for ch in text]
                 w = sum(g.get_width() for g in glyphs) + spacing * max(0, len(glyphs) - 1)
                 h = max((g.get_height() for g in glyphs), default=font.get_height())
@@ -97,17 +113,23 @@ class Renderer:
             self.text_cache[key] = surf
         return surf
 
+    def text_size(self, text, size, color=(255, 255, 255), spacing=0):
+        """Size of a text label in logical pixels."""
+        return gfx.logical_size(self.text_surface(text, size, color, spacing))
+
     def blit_text(self, text, size, color, pos, anchor="topleft", spacing=0, target=None):
+        """Draw text; `pos`/`anchor` and the returned rect are in logical pixels."""
         surf = self.text_surface(text, size, color, spacing)
-        rect = surf.get_rect(**{anchor: (int(pos[0]), int(pos[1]))})
+        rect = surf.get_rect(**{anchor: (round(pos[0] * gfx.SCALE), round(pos[1] * gfx.SCALE))})
         (target or self.screen).blit(surf, rect)
-        return rect
+        k = gfx.SCALE
+        return pygame.Rect(round(rect.x / k), round(rect.y / k), round(rect.w / k), round(rect.h / k))
 
     def wrap(self, text, size, width, spacing=0):
         words, lines, line = text.split(), [], ""
         for w in words:
             trial = (line + " " + w).strip()
-            if self.text_surface(trial, size, (255, 255, 255), spacing).get_width() <= width or not line:
+            if self.text_size(trial, size, spacing=spacing)[0] <= width or not line:
                 line = trial
             else:
                 lines.append(line)
@@ -117,42 +139,44 @@ class Renderer:
         return lines
 
     def glow(self, radius, color, strength):
-        radius = max(2, int(radius))
+        """A soft radial light (built in real pixels and cached)."""
+        rp = max(2, round(radius * gfx.SCALE))
         strength = round(strength, 1)
-        key = (radius, color, strength)
+        key = (rp, color, strength)
         surf = self.glows.get(key)
         if surf is None:
             if len(self.glows) > 300:
                 self.glows.clear()
-            surf = pygame.Surface((radius * 2, radius * 2))
+            surf = pygame.Surface((rp * 2, rp * 2))
             surf.fill((0, 0, 0))
-            for r in range(radius, 0, -1):
-                k = (1 - r / radius) ** 2 * strength
-                pygame.draw.circle(surf, scale(color, k), (radius, radius), r)
+            for r in range(rp, 0, -1):
+                k = (1 - r / rp) ** 2 * strength
+                pygame.draw.circle(surf, scale(color, k), (rp, rp), r)
             self.glows[key] = surf
         return surf
 
     def draw_glow(self, x, y, radius, color, strength=0.6, target=None):
         surf = self.glow(radius, color, strength)
         r = surf.get_width() // 2
-        (target or self.screen).blit(surf, (int(x) - r, int(y) - r),
+        (target or self.screen).blit(surf, (round(x * gfx.SCALE) - r, round(y * gfx.SCALE) - r),
                                      special_flags=pygame.BLEND_RGB_ADD)
 
     def card(self, rect, title=None, accent=None):
-        pygame.draw.rect(self.screen, C.CARD_BG, rect, border_radius=14)
-        pygame.draw.rect(self.screen, C.CARD_EDGE, rect, width=1, border_radius=14)
+        gfx.rect(self.screen, C.CARD_BG, rect, border_radius=14)
+        gfx.rect(self.screen, C.CARD_EDGE, rect, width=1, border_radius=14)
         if accent:
-            pygame.draw.rect(self.screen, accent, (rect[0] + 16, rect[1], 36, 3), border_radius=2)
+            gfx.rect(self.screen, accent, (rect[0] + 16, rect[1], 36, 3), border_radius=2)
         if title:
             self.blit_text(title, 17, C.MUTED, (rect[0] + 16, rect[1] + 14), spacing=2)
 
     def pill(self, x, y, text, color, target=None):
         surf = self.text_surface(text, 17, color, 1)
-        w, h = surf.get_width() + 20, 24
+        tw, th = gfx.logical_size(surf)
+        w, h = tw + 20, 24
         tgt = target or self.screen
-        pygame.draw.rect(tgt, scale(color, 0.18), (x, y, w, h), border_radius=12)
-        pygame.draw.rect(tgt, scale(color, 0.7), (x, y, w, h), width=1, border_radius=12)
-        tgt.blit(surf, (x + 10, y + (h - surf.get_height()) // 2 + 1))
+        gfx.rect(tgt, scale(color, 0.18), (x, y, w, h), border_radius=12)
+        gfx.rect(tgt, scale(color, 0.7), (x, y, w, h), width=1, border_radius=12)
+        gfx.blit(tgt, surf, (x + 10, y + (h - th) / 2 + 1))
         return w
 
     def arrow(self, center, direction, size, color):
@@ -163,9 +187,9 @@ class Renderer:
         base = (x - dx * size * 0.2, y - dy * size * 0.2)
         left = (base[0] + px * size * 0.75, base[1] + py * size * 0.75)
         right = (base[0] - px * size * 0.75, base[1] - py * size * 0.75)
-        pygame.draw.polygon(self.screen, color, (tip, left, right))
+        gfx.polygon(self.screen, color, (tip, left, right))
         tail_end = (x - dx * size, y - dy * size)
-        pygame.draw.line(self.screen, color, base, tail_end, max(2, int(size * 0.45)))
+        gfx.line(self.screen, color, base, tail_end, max(2, int(size * 0.45)))
 
     def power_icon(self, x, y, kind, color, target=None, r=8):
         tgt = target or self.screen
@@ -173,31 +197,48 @@ class Renderer:
             for k in range(3):
                 a = math.pi * k / 3
                 dx, dy = math.cos(a) * r, math.sin(a) * r
-                pygame.draw.line(tgt, color, (x - dx, y - dy), (x + dx, y + dy), 2)
+                gfx.line(tgt, color, (x - dx, y - dy), (x + dx, y + dy), 2)
         elif kind == "decoy":
-            pygame.draw.circle(tgt, color, (x - r * 0.35, y), r * 0.6, 2)
-            pygame.draw.circle(tgt, color, (x + r * 0.45, y), r * 0.6)
+            gfx.circle(tgt, color, (x - r * 0.35, y), r * 0.6, 2)
+            gfx.circle(tgt, color, (x + r * 0.45, y), r * 0.6)
         else:
             pts = [(x - r * 0.8, y - r * 0.7), (x + r * 0.8, y - r * 0.7),
                    (x + r * 0.8, y + r * 0.1), (x, y + r), (x - r * 0.8, y + r * 0.1)]
-            pygame.draw.polygon(tgt, color, pts, 2)
+            gfx.polygon(tgt, color, pts, 2)
+
+    def tint(self, rect, rgba, radius=0):
+        """Draw a translucent (optionally rounded) rectangle, cached so it costs one blit."""
+        x, y, w, h = rect
+        rgba = (*rgba[:3], max(0, min(255, int(rgba[3]) // 8 * 8)))   # few cache entries
+        key = (round(w), round(h), rgba, radius)
+        surf = self.tints.get(key)
+        if surf is None:
+            if len(self.tints) > 120:
+                self.tints.clear()
+            surf = gfx.surface((w, h), pygame.SRCALPHA)
+            if radius:
+                gfx.rect(surf, rgba, (0, 0, w, h), border_radius=radius)
+            else:
+                surf.fill(rgba)
+            self.tints[key] = surf
+        gfx.blit(self.screen, surf, (x, y))
 
     # ============================================================== backdrop
     def _make_backdrop(self):
-        surf = pygame.Surface((C.WIDTH, C.HEIGHT))
+        surf = gfx.surface((C.WIDTH, C.HEIGHT))
         surf.fill(C.BG)
         for x in range(0, C.WIDTH, 40):
             for y in range(0, C.HEIGHT, 40):
-                pygame.draw.circle(surf, (22, 29, 52), (x, y), 1)
+                gfx.circle(surf, (22, 29, 52), (x, y), 1)
         return surf
 
     def _make_vignette(self):
         """Red glow around the arena edge, shown when a hunter is close."""
-        surf = pygame.Surface((C.ARENA_W, C.ARENA_H), pygame.SRCALPHA)
+        surf = gfx.surface((C.ARENA_W, C.ARENA_H), pygame.SRCALPHA)
         depth = 56
         for i in range(depth):
             a = int(170 * (1 - i / depth) ** 2)
-            pygame.draw.rect(surf, (255, 40, 90, a),
+            gfx.rect(surf, (255, 40, 90, a),
                              (i, i, C.ARENA_W - 2 * i, C.ARENA_H - 2 * i), width=1,
                              border_radius=max(0, 16 - i))
         return surf
@@ -209,18 +250,18 @@ class Renderer:
                 s[1] = C.HEIGHT + 20
                 s[0] = random.uniform(0, C.WIDTH)
             if self.low_quality:
-                pygame.draw.circle(self.screen, scale(s[3], 0.35), (s[0], s[1]), 2)
+                gfx.circle(self.screen, scale(s[3], 0.35), (s[0], s[1]), 2)
             else:
                 self.draw_glow(s[0], s[1], 10 + s[2] * 0.5, s[3], 0.25)
 
     # ================================================================= arena
     def _build_arena(self, arena):
-        surf = pygame.Surface((C.ARENA_W, C.ARENA_H))
+        surf = gfx.surface((C.ARENA_W, C.ARENA_H))
         surf.fill(C.BG)
-        pygame.draw.rect(surf, C.ARENA_BG, surf.get_rect(), border_radius=16)
+        gfx.rect(surf, C.ARENA_BG, (0, 0, C.ARENA_W, C.ARENA_H), border_radius=16)
         for c in range(1, arena.cols):
             for r in range(1, arena.rows):
-                pygame.draw.circle(surf, C.GRID_DOT, (c * C.CELL, r * C.CELL), 2)
+                gfx.circle(surf, C.GRID_DOT, (c * C.CELL, r * C.CELL), 2)
         cs, pad = C.CELL, 6
         pieces = []
         for (c, r) in arena.walls:
@@ -233,10 +274,10 @@ class Renderer:
             if {(c + 1, r), (c, r + 1), (c + 1, r + 1)} <= arena.walls:   # fill 2x2 blocks
                 pieces.append(pygame.Rect(x + cs // 2, y + cs // 2, cs, cs))
         for rect in pieces:
-            pygame.draw.rect(surf, C.WALL_EDGE, rect.inflate(4, 4), border_radius=9)
+            gfx.rect(surf, C.WALL_EDGE, rect.inflate(4, 4), border_radius=9)
         for rect in pieces:
-            pygame.draw.rect(surf, C.WALL, rect, border_radius=7)
-        pygame.draw.rect(surf, C.CARD_EDGE, surf.get_rect(), width=2, border_radius=16)
+            gfx.rect(surf, C.WALL, rect, border_radius=7)
+        gfx.rect(surf, C.CARD_EDGE, (0, 0, C.ARENA_W, C.ARENA_H), width=2, border_radius=16)
         return surf
 
     def px(self, cell):
@@ -310,20 +351,27 @@ class Renderer:
         if world.arena is not self.arena_ref:
             self.arena_ref = world.arena
             self.arena_surf = self._build_arena(world.arena)
+            self.static = self.backdrop.copy()
+            gfx.blit(self.static, self.arena_surf, (C.ARENA_X, C.ARENA_Y))
 
         scr = self.screen
-        scr.blit(self.backdrop, (0, 0))
-        scr.blit(self.arena_surf, (C.ARENA_X + self.ox, C.ARENA_Y + self.oy))
+        if self.ox == 0 and self.oy == 0:
+            scr.blit(self.static, (0, 0))                  # one blit instead of two
+        else:
+            gfx.blit(scr, self.backdrop, (0, 0))
+            gfx.blit(scr, self.arena_surf, (C.ARENA_X + self.ox, C.ARENA_Y + self.oy))
 
-        self.overlay.fill((0, 0, 0, 0))
-        if self.vision and world.phase in ("play", "intro"):
-            self._draw_vision(world)
-        if world.decoy_active:
-            x, y = self.local(world.decoy_cell)
-            a = int(110 + 70 * math.sin(self.t * 8))
-            pygame.draw.circle(self.overlay, (*C.DECOY_C, a), (x, y), 12)
-            pygame.draw.circle(self.overlay, (*C.DECOY_C, 200), (x, y), 17, 2)
-        scr.blit(self.overlay, (C.ARENA_X + self.ox, C.ARENA_Y + self.oy))
+        vision = self.vision and world.phase in ("play", "intro")
+        if vision or world.decoy_active:                   # the overlay only when needed
+            self.overlay.fill((0, 0, 0, 0))
+            if vision:
+                self._draw_vision(world)
+            if world.decoy_active:
+                x, y = self.local(world.decoy_cell)
+                a = int(110 + 70 * math.sin(self.t * 8))
+                gfx.circle(self.overlay, (*C.DECOY_C, a), (x, y), 12)
+                gfx.circle(self.overlay, (*C.DECOY_C, 200), (x, y), 17, 2)
+            gfx.blit(scr, self.overlay, (C.ARENA_X + self.ox, C.ARENA_Y + self.oy))
 
         if world.orb:
             self._draw_orb(world.orb)
@@ -338,7 +386,7 @@ class Renderer:
         if world.phase == "play" and world.danger > 0.02:
             pulse = 0.75 + 0.25 * math.sin(self.t * 8)
             self.vignette.set_alpha(int(255 * min(1.0, world.danger) * pulse))
-            scr.blit(self.vignette, (C.ARENA_X + self.ox, C.ARENA_Y + self.oy))
+            gfx.blit(scr, self.vignette, (C.ARENA_X + self.ox, C.ARENA_Y + self.oy))
 
         if world.phase in ("killcam", "over") and world.killcam:
             self._draw_killcam(world)
@@ -349,8 +397,7 @@ class Renderer:
         self._draw_banner(world)
 
         if self.effects.flash > 0:
-            self.shade.fill((*self.effects.flash_color, int(90 * self.effects.flash)))
-            scr.blit(self.shade, (0, 0))
+            self.tint((0, 0, C.WIDTH, C.HEIGHT), (*self.effects.flash_color, 90 * self.effects.flash))
         if show_hud:
             self._draw_hud(world, best, muted)
             self._draw_panel(world)
@@ -363,21 +410,21 @@ class Renderer:
                 for i, cell in enumerate(h.forecast):
                     x, y = self.local(cell)
                     a = max(40, 210 - i * 22)
-                    pygame.draw.circle(ov, (*C.PLAYER, a), (x, y), max(5, 11 - i), 2)
+                    gfx.circle(ov, (*C.PLAYER, a), (x, y), max(5, 11 - i), 2)
             vc = h.visual_cell()
             pts = [self.local(vc)] + [self.local(c) for c in h.plan]
             if len(pts) >= 2:
-                pygame.draw.lines(ov, (*col, 110), False, pts, 3)
+                gfx.lines(ov, (*col, 110), False, pts, 3)
                 for p in pts[1:]:
-                    pygame.draw.circle(ov, (*col, 170), p, 3)
+                    gfx.circle(ov, (*col, 170), p, 3)
             if h.target is not None:
                 x, y = self.local(h.target)
                 r = 14 + 2 * math.sin(self.t * 6)
-                pygame.draw.circle(ov, (*col, 220), (x, y), r, 2)
-                pygame.draw.line(ov, (*col, 220), (x - r - 5, y), (x - r + 5, y), 2)
-                pygame.draw.line(ov, (*col, 220), (x + r - 5, y), (x + r + 5, y), 2)
-                pygame.draw.line(ov, (*col, 220), (x, y - r - 5), (x, y - r + 5), 2)
-                pygame.draw.line(ov, (*col, 220), (x, y + r - 5), (x, y + r + 5), 2)
+                gfx.circle(ov, (*col, 220), (x, y), r, 2)
+                gfx.line(ov, (*col, 220), (x - r - 5, y), (x - r + 5, y), 2)
+                gfx.line(ov, (*col, 220), (x + r - 5, y), (x + r + 5, y), 2)
+                gfx.line(ov, (*col, 220), (x, y - r - 5), (x, y - r + 5), 2)
+                gfx.line(ov, (*col, 220), (x, y + r - 5), (x, y + r + 5), 2)
 
     def _draw_orb(self, orb):
         x, y = self.px(orb.cell)
@@ -385,9 +432,9 @@ class Renderer:
         pulse = 0.5 + 0.5 * math.sin(self.t * 5)
         self.draw_glow(x, y, (26 + 6 * pulse) * grow, C.ORB, 0.6)
         if grow > 0.05:
-            pygame.draw.circle(self.screen, scale(C.ORB, 0.55), (x, y), (11 + 2 * pulse) * grow, 2)
-            pygame.draw.circle(self.screen, C.ORB, (x, y), 7 * grow)
-            pygame.draw.circle(self.screen, (245, 255, 225), (x - 2, y - 2), 2.5 * grow)
+            gfx.circle(self.screen, scale(C.ORB, 0.55), (x, y), (11 + 2 * pulse) * grow, 2)
+            gfx.circle(self.screen, C.ORB, (x, y), 7 * grow)
+            gfx.circle(self.screen, (245, 255, 225), (x - 2, y - 2), 2.5 * grow)
 
     def _draw_powerup(self, pu):
         remaining = pu.life - pu.age
@@ -398,8 +445,8 @@ class Renderer:
         col = POWER_COLORS[pu.kind]
         grow = min(1.0, pu.age / 0.3)
         self.draw_glow(x, y, 30 * grow, col, 0.55)
-        pygame.draw.circle(self.screen, scale(col, 0.15), (x, y), 14 * grow)
-        pygame.draw.circle(self.screen, col, (x, y), 14 * grow, 2)
+        gfx.circle(self.screen, scale(col, 0.15), (x, y), 14 * grow)
+        gfx.circle(self.screen, col, (x, y), 14 * grow, 2)
         if grow >= 1.0:
             self.power_icon(x, y, pu.kind, col)
 
@@ -413,17 +460,17 @@ class Renderer:
         for i, (tx, ty) in enumerate(self.trail[:-1]):
             k = (i + 1) / n
             if self.low_quality:
-                pygame.draw.circle(self.screen, scale(C.PLAYER, 0.5 * k), (tx + self.ox, ty + self.oy),
+                gfx.circle(self.screen, scale(C.PLAYER, 0.5 * k), (tx + self.ox, ty + self.oy),
                                    2 + 6 * k)
             else:
                 self.draw_glow(tx + self.ox, ty + self.oy, 6 + 10 * k, C.PLAYER, 0.3 * k)
         self.draw_glow(x, y, 38, C.PLAYER, 0.65)
-        pygame.draw.circle(self.screen, C.PLAYER, (x, y), 11)
-        pygame.draw.circle(self.screen, (225, 252, 255), (x, y), 5)
+        gfx.circle(self.screen, C.PLAYER, (x, y), 11)
+        gfx.circle(self.screen, (225, 252, 255), (x, y), 5)
         if world.shield:
             for k in range(6):
                 a0 = self.t * 2.5 + k * math.tau / 6
-                pygame.draw.arc(self.screen, C.SHIELD_C, (x - 18, y - 18, 36, 36), a0, a0 + 0.6, 2)
+                gfx.arc(self.screen, C.SHIELD_C, (x - 18, y - 18, 36, 36), a0, a0 + 0.6, 2)
 
     def _draw_hunter(self, h, world, idx):
         vx, vy = h.visual_cell()
@@ -443,12 +490,12 @@ class Renderer:
         if h.brain.id == "mirror":
             # an "evil twin" of the player: same round body, inverted colours
             self.draw_glow(x, y, 42 + 4 * pulse, col, 0.5)
-            pygame.draw.circle(self.screen, (18, 22, 40), (x, y), 12)
-            pygame.draw.circle(self.screen, col, (x, y), 13, 3)
-            pygame.draw.circle(self.screen, C.HUNTER, (x + ex, y + ey), 4)
+            gfx.circle(self.screen, (18, 22, 40), (x, y), 12)
+            gfx.circle(self.screen, col, (x, y), 13, 3)
+            gfx.circle(self.screen, C.HUNTER, (x + ex, y + ey), 4)
             for k in range(3):
                 a = -self.t * 2 + k * math.tau / 3
-                pygame.draw.arc(self.screen, scale(col, 0.6), (x - 19, y - 19, 38, 38), a, a + 0.8, 1)
+                gfx.arc(self.screen, scale(col, 0.6), (x - 19, y - 19, 38, 38), a, a + 0.8, 1)
         else:
             self.draw_glow(x, y, 44 + 4 * pulse, col, 0.6)
             size = 12 + min(world.level_no, 6) * 0.7 + 1.5 * pulse
@@ -457,18 +504,18 @@ class Renderer:
                       y + math.sin(spin + k * math.pi / 2) * size) for k in range(4)]
             inner = [(x + math.cos(spin + k * math.pi / 2) * size * 0.5,
                       y + math.sin(spin + k * math.pi / 2) * size * 0.5) for k in range(4)]
-            pygame.draw.polygon(self.screen, col, outer)
-            pygame.draw.polygon(self.screen, scale(col, 0.25), inner)
+            gfx.polygon(self.screen, col, outer)
+            gfx.polygon(self.screen, scale(col, 0.25), inner)
             if h.brain.id in ("astar", "mindreader"):
-                pygame.draw.circle(self.screen, scale(col, 0.55), (x, y), size + 7, 1)
+                gfx.circle(self.screen, scale(col, 0.55), (x, y), size + 7, 1)
             if h.brain.id == "mindreader":       # orbiting "thoughts"
                 for k in range(3):
                     a = self.t * 4 + k * math.tau / 3
-                    pygame.draw.circle(self.screen, (255, 235, 245),
+                    gfx.circle(self.screen, (255, 235, 245),
                                        (x + math.cos(a) * (size + 7), y + math.sin(a) * (size + 7)), 2.5)
-            pygame.draw.circle(self.screen, (255, 255, 255), (x + ex, y + ey), 3)
+            gfx.circle(self.screen, (255, 255, 255), (x + ex, y + ey), 3)
         if world.frozen:
-            pygame.draw.circle(self.screen, (220, 240, 255), (x, y), 22, 1)
+            gfx.circle(self.screen, (220, 240, 255), (x, y), 22, 1)
         if confused:
             bob = math.sin(self.t * 6 + idx) * 3
             self.blit_text("?", 34, C.WARN, (x + 24, y - 20 + bob), "center")
@@ -476,12 +523,12 @@ class Renderer:
     def _draw_effects(self):
         for p in self.effects.particles:
             k = p.life / p.max_life
-            pygame.draw.circle(self.screen, scale(p.color, 0.4 + 0.6 * k), (p.x + self.ox, p.y + self.oy),
+            gfx.circle(self.screen, scale(p.color, 0.4 + 0.6 * k), (p.x + self.ox, p.y + self.oy),
                                max(1, p.size * k))
         for t in self.effects.texts:
             k = t.life / t.max_life
             col = scale(t.color, min(1.0, k * 1.6))
-            half = self.text_surface(t.text, t.size, col).get_width() / 2
+            half = self.text_size(t.text, t.size)[0] / 2
             x = max(C.ARENA_X + half + 6, min(C.ARENA_X + C.ARENA_W - half - 6, t.x))
             y = max(C.ARENA_Y + 52, t.y)                     # stay below the status pills
             self.blit_text(t.text, t.size, col, (x, y), "center")
@@ -499,23 +546,24 @@ class Renderer:
             x, y = self.px(h.visual_cell())
             fade = max(0.0, min(1.0, (max_life - life) / 0.12, life / 0.3))
             surf = self.text_surface(text, 21, (12, 16, 30))
-            w, hgt = surf.get_width() + 22, surf.get_height() + 14
+            tw, th = gfx.logical_size(surf)
+            w, hgt = tw + 22, th + 14
             bx = max(C.ARENA_X + 6, min(C.ARENA_X + C.ARENA_W - w - 6, x - w / 2))
             above = y - 36 - hgt >= C.ARENA_Y + 4
             by = y - 36 - hgt if above else y + 34
-            bubble = pygame.Surface((w, hgt + 10), pygame.SRCALPHA)
+            bubble = gfx.surface((w, hgt + 10), pygame.SRCALPHA)
             top = 0 if above else 10
-            pygame.draw.rect(bubble, (240, 244, 255), (0, top, w, hgt), border_radius=11)
-            pygame.draw.rect(bubble, h.color, (0, top, w, hgt), width=2, border_radius=11)
+            gfx.rect(bubble, (240, 244, 255), (0, top, w, hgt), border_radius=11)
+            gfx.rect(bubble, h.color, (0, top, w, hgt), width=2, border_radius=11)
             tx = max(14, min(w - 14, x - bx))
             if above:
                 tail = [(tx - 7, hgt - 1), (tx + 7, hgt - 1), (tx, hgt + 9)]
             else:
                 tail = [(tx - 7, 11), (tx + 7, 11), (tx, 1)]
-            pygame.draw.polygon(bubble, (240, 244, 255), tail)
-            bubble.blit(surf, (11, top + 8))
+            gfx.polygon(bubble, (240, 244, 255), tail)
+            gfx.blit(bubble, surf, (11, top + 8))
             bubble.set_alpha(int(255 * fade))
-            self.screen.blit(bubble, (bx, by - (0 if above else 10)))
+            gfx.blit(self.screen, bubble, (bx, by - (0 if above else 10)))
 
     def _draw_status_pills(self, world):
         if world.phase == "killcam":
@@ -540,9 +588,7 @@ class Renderer:
         else:
             prog = 1.0
         ax, ay = C.ARENA_X + self.ox, C.ARENA_Y + self.oy
-        self.shade.fill((0, 0, 0, 0))
-        pygame.draw.rect(self.shade, (4, 6, 14, 175), (ax, ay, C.ARENA_W, C.ARENA_H), border_radius=16)
-        self.screen.blit(self.shade, (0, 0))
+        self.tint((ax, ay, C.ARENA_W, C.ARENA_H), (4, 6, 14, 175), 16)
 
         ov = self.overlay
         ov.fill((0, 0, 0, 0))
@@ -551,23 +597,23 @@ class Renderer:
         if forecast:
             pts = [self.local(c) for c in forecast]
             if len(pts) >= 2:
-                pygame.draw.lines(ov, (*kc["color"], int(150 * fade)), False, pts, 3)
+                gfx.lines(ov, (*kc["color"], int(150 * fade)), False, pts, 3)
             for p in pts:
-                pygame.draw.circle(ov, (*kc["color"], int(230 * fade)), p, 6, 2)
+                gfx.circle(ov, (*kc["color"], int(230 * fade)), p, 6, 2)
         path = [self.local(c) for c in kc["path"]]
         k = max(1, min(len(path), 1 + int((len(path) - 1) * min(1.0, prog / 0.6))))
         if k >= 2:
-            pygame.draw.lines(ov, (*C.PLAYER, 235), False, path[:k], 4)
+            gfx.lines(ov, (*C.PLAYER, 235), False, path[:k], 4)
         cx, cy = self.local(kc["catch"])
         r = 16 + 3 * math.sin(self.t * 8)
-        pygame.draw.circle(ov, (*C.HUNTER, 230), (cx, cy), r, 3)
-        pygame.draw.line(ov, (*C.HUNTER, 230), (cx - 8, cy - 8), (cx + 8, cy + 8), 3)
-        pygame.draw.line(ov, (*C.HUNTER, 230), (cx + 8, cy - 8), (cx - 8, cy + 8), 3)
-        self.screen.blit(ov, (ax, ay))
+        gfx.circle(ov, (*C.HUNTER, 230), (cx, cy), r, 3)
+        gfx.line(ov, (*C.HUNTER, 230), (cx - 8, cy - 8), (cx + 8, cy + 8), 3)
+        gfx.line(ov, (*C.HUNTER, 230), (cx + 8, cy - 8), (cx - 8, cy + 8), 3)
+        gfx.blit(self.screen, ov, (ax, ay))
 
         hx, hy = path[k - 1]
         self.draw_glow(ax + hx, ay + hy, 30, C.PLAYER, 0.7)
-        pygame.draw.circle(self.screen, C.PLAYER, (ax + hx, ay + hy), 8)
+        gfx.circle(self.screen, C.PLAYER, (ax + hx, ay + hy), 8)
         if forecast and fade > 0.5:
             fx, fy = self.local(forecast[0])
             self.blit_text("AI PREDICTION", 16, kc["color"], (ax + fx, ay + fy - 18), "midbottom",
@@ -581,7 +627,7 @@ class Renderer:
         mid = C.ARENA_X + C.ARENA_W // 2
         if world.phase == "killcam":
             blink = int(self.t * 3) % 2 == 0
-            pygame.draw.circle(self.screen, C.HUNTER if blink else scale(C.HUNTER, 0.3),
+            gfx.circle(self.screen, C.HUNTER if blink else scale(C.HUNTER, 0.3),
                                (C.ARENA_X + 24, C.ARENA_Y + 24), 6)
             self.blit_text("KILL CAM", 17, C.TEXT, (C.ARENA_X + 36, C.ARENA_Y + 24), "midleft", spacing=3)
             self.blit_text("TAP to skip" if C.TOUCH else "SPACE / TAP to skip", 16, C.DIM, (mid, C.ARENA_Y + C.ARENA_H - 18),
@@ -589,11 +635,12 @@ class Renderer:
             quote = kc.get("quote")
             if quote and prog > 0.35:
                 surf = self.text_surface(f'"{quote}"', 22, (12, 16, 30))
-                qw, qh = surf.get_width() + 28, surf.get_height() + 16
+                tw, th = gfx.logical_size(surf)
+                qw, qh = tw + 28, th + 16
                 qx, qy = mid - qw // 2, C.ARENA_Y + C.ARENA_H - 50 - qh
-                pygame.draw.rect(self.screen, (240, 244, 255), (qx, qy, qw, qh), border_radius=12)
-                pygame.draw.rect(self.screen, kc["color"], (qx, qy, qw, qh), width=2, border_radius=12)
-                self.screen.blit(surf, (qx + 14, qy + 9))
+                gfx.rect(self.screen, (240, 244, 255), (qx, qy, qw, qh), border_radius=12)
+                gfx.rect(self.screen, kc["color"], (qx, qy, qw, qh), width=2, border_radius=12)
+                gfx.blit(self.screen, surf, (qx + 14, qy + 9))
         title_y = C.ARENA_Y + 58
         self.draw_glow(mid, title_y, 140, kc["color"], 0.15)
         cap_lines = self.wrap(kc["caption"], 38, C.ARENA_W - 60, 2)[:2]
@@ -609,9 +656,7 @@ class Renderer:
             lvl = world.level
             k = min(1.0, (C.INTRO_TIME - world.phase_timer) / 0.25)
             band = pygame.Rect(C.ARENA_X, cy - 110, C.ARENA_W, 220)
-            self.shade.fill((0, 0, 0, 0))
-            pygame.draw.rect(self.shade, (5, 8, 16, int(215 * k)), band)
-            self.screen.blit(self.shade, (0, 0))
+            self.tint(band, (5, 8, 16, 215 * k))
             col = world.hunters[0].color
             self.blit_text(f"LEVEL {lvl.number}", 22, C.MUTED, (cx, cy - 78), "center", spacing=6)
             self.draw_glow(cx, cy - 26, 120, col, 0.18)
@@ -621,14 +666,11 @@ class Renderer:
             hint = lvl.blurb if lvl.number > 1 else "Arrows / WASD (or swipe) to move."
             self.blit_text(hint, 24, C.MUTED, (cx, cy + 54), "center")
             frac = max(0.0, world.phase_timer / C.INTRO_TIME)
-            pygame.draw.rect(self.screen, C.CARD_EDGE, (cx - 120, cy + 84, 240, 4), border_radius=2)
-            pygame.draw.rect(self.screen, col, (cx - 120, cy + 84, int(240 * frac), 4), border_radius=2)
+            gfx.rect(self.screen, C.CARD_EDGE, (cx - 120, cy + 84, 240, 4), border_radius=2)
+            gfx.rect(self.screen, col, (cx - 120, cy + 84, int(240 * frac), 4), border_radius=2)
         elif world.phase == "clear":
             k = min(1.0, (C.CLEAR_TIME - world.phase_timer) / 0.2)
-            self.shade.fill((0, 0, 0, 0))
-            pygame.draw.rect(self.shade, (5, 8, 16, int(200 * k)),
-                             (C.ARENA_X, cy - 80, C.ARENA_W, 150))
-            self.screen.blit(self.shade, (0, 0))
+            self.tint((C.ARENA_X, cy - 80, C.ARENA_W, 150), (5, 8, 16, 200 * k))
             self.draw_glow(cx, cy - 20, 130, C.GOOD, 0.15)
             self.blit_text("LEVEL CLEAR", 76, C.GOOD, (cx, cy - 20), "center", spacing=4)
             self.blit_text(f"+{C.LEVEL_BONUS * world.level_no} BONUS", 28, C.TEXT, (cx, cy + 30),
@@ -642,8 +684,8 @@ class Renderer:
         color = color or C.PLAYER
         r = pygame.Rect(rect)
         fill = scale(color, 0.22) if active else C.CARD_BG
-        pygame.draw.rect(self.screen, fill, r, border_radius=14)
-        pygame.draw.rect(self.screen, color if active else C.CARD_EDGE, r, width=2, border_radius=14)
+        gfx.rect(self.screen, fill, r, border_radius=14)
+        gfx.rect(self.screen, color if active else C.CARD_EDGE, r, width=2, border_radius=14)
         self.blit_text(label, 19, color if active else C.TEXT, r.center, "center", spacing=2)
         self.buttons.append((r, action))
 
@@ -658,11 +700,11 @@ class Renderer:
         for d, (dx, dy) in C.DIRS.items():
             bx, by = cx + dx * offset, cy + dy * offset
             active = d in self.pressed_dirs
-            pygame.draw.circle(self.screen, scale(C.PLAYER, 0.25) if active else C.CARD_BG, (bx, by), r)
-            pygame.draw.circle(self.screen, C.PLAYER if active else C.CARD_EDGE, (bx, by), r, 2)
+            gfx.circle(self.screen, scale(C.PLAYER, 0.25) if active else C.CARD_BG, (bx, by), r)
+            gfx.circle(self.screen, C.PLAYER if active else C.CARD_EDGE, (bx, by), r, 2)
             self.arrow((bx, by), d, 15, C.PLAYER if active else C.TEXT)
             self.buttons.append((pygame.Rect(bx - r, by - r, 2 * r, 2 * r), "dir:" + d))
-        pygame.draw.circle(self.screen, C.CARD_EDGE, (cx, cy), 10, 2)
+        gfx.circle(self.screen, C.CARD_EDGE, (cx, cy), 10, 2)
 
     def _draw_controls(self, world, muted):
         if not C.TOUCH:
@@ -694,10 +736,10 @@ class Renderer:
         self.blit_text(f"ORBS  {got} / {need}", 17, C.TEXT, (bx, by), spacing=2)
         if world.combo > 1:
             self.blit_text(f"x{world.combo} COMBO", 17, C.WARN, (bx + bw, by), "topright", spacing=1)
-        pygame.draw.rect(self.screen, C.CARD_EDGE, (bx, by + 20, bw, 8), border_radius=4)
+        gfx.rect(self.screen, C.CARD_EDGE, (bx, by + 20, bw, 8), border_radius=4)
         fill = int(bw * got / need)
         if fill > 0:
-            pygame.draw.rect(self.screen, C.ORB, (bx, by + 20, fill, 8), border_radius=4)
+            gfx.rect(self.screen, C.ORB, (bx, by + 20, fill, 8), border_radius=4)
 
         # chaos meter: surprise the AI to fill it
         cbx, cbw, cy = bx + 74, bw - 74, by + 40
@@ -710,9 +752,9 @@ class Renderer:
             col, frac = C.CHAOS_C, world.chaos
             if frac > 0.75:
                 col = scale(C.CHAOS_C, 0.8 + 0.4 * (0.5 + 0.5 * math.sin(self.t * 10)))
-        pygame.draw.rect(self.screen, C.CARD_EDGE, (cbx, cy - 4, cbw, 8), border_radius=4)
+        gfx.rect(self.screen, C.CARD_EDGE, (cbx, cy - 4, cbw, 8), border_radius=4)
         if frac > 0:
-            pygame.draw.rect(self.screen, col, (cbx, cy - 4, max(6, int(cbw * frac)), 8), border_radius=4)
+            gfx.rect(self.screen, col, (cbx, cy - 4, max(6, int(cbw * frac)), 8), border_radius=4)
 
     def _draw_hud(self, world, best, muted):
         self.blit_text("PREDICTABLE", 34, C.TEXT, (C.ARENA_X, 16), spacing=3)
@@ -749,7 +791,7 @@ class Renderer:
             self.blit_text(line, 18, C.MUTED, (x + 16, y + 94 + i * 16))
         for i, hun in enumerate(world.hunters[:2]):
             ry = y + 134 + i * 17 - (8 if len(world.hunters) == 1 else 0)
-            pygame.draw.circle(self.screen, hun.color, (x + 22, ry + 6), 4)
+            gfx.circle(self.screen, hun.color, (x + 22, ry + 6), 4)
             if world.confused:
                 txt = "confused  ·  random moves"
             elif hun.brain.id in BRAIN_NOTES:
@@ -779,9 +821,9 @@ class Renderer:
             active = d == best_move
             col = C.PLAYER if active else C.MUTED
             self.arrow((cx0 + 28, ry), d, 8, col if d in dist else C.DIM)
-            pygame.draw.rect(self.screen, C.CARD_EDGE, (cx0 + 48, ry - 5, bar_w, 10), border_radius=5)
+            gfx.rect(self.screen, C.CARD_EDGE, (cx0 + 48, ry - 5, bar_w, 10), border_radius=5)
             if p > 0:
-                pygame.draw.rect(self.screen, C.PLAYER if active else scale(C.PLAYER, 0.45),
+                gfx.rect(self.screen, C.PLAYER if active else scale(C.PLAYER, 0.45),
                                  (cx0 + 48, ry - 5, max(6, int(bar_w * p)), 10), border_radius=5)
             label = f"{p * 100:.0f}%" if d in dist else "wall"
             self.blit_text(label, 18, col if d in dist else C.DIM, (cx0 + colw - 16, ry), "midright")
@@ -808,7 +850,8 @@ class Renderer:
     def _title_surface(self, size):
         text = self.text_surface("PREDICTABLE", size, C.TEXT, 6)
         w, h = text.get_size()
-        pad = 40
+        pad_logical = 40
+        pad = round(pad_logical * gfx.SCALE)
         surf = pygame.Surface((w + pad * 2, h + pad * 2))
         surf.fill((0, 0, 0))
         # glyph surfaces carry colour in their transparent pixels, so flatten the
@@ -820,13 +863,13 @@ class Renderer:
         blur = pygame.transform.smoothscale(small, (w, h))
         for _ in range(2):
             surf.blit(blur, (pad, pad), special_flags=pygame.BLEND_RGB_ADD)
-        return surf, text, pad
+        return surf, text, pad_logical
 
     def draw_title(self, dt, best, runs, types_found=0, muted=False):
         self.t += dt
         self.buttons = []
         scr = self.screen
-        scr.blit(self.backdrop, (0, 0))
+        gfx.blit(scr, self.backdrop, (0, 0))
         self.draw_stars(dt)
         cx = C.WIDTH // 2
         portrait = C.PORTRAIT
@@ -838,21 +881,21 @@ class Renderer:
         hx = px - 90 - 20 * math.sin(self.t * 2)
         y0 = chase_y + 6 * math.sin(self.t * 3)
         self.draw_glow(px, y0, 30, C.PLAYER, 0.6)
-        pygame.draw.circle(scr, C.PLAYER, (px, y0), 9)
+        gfx.circle(scr, C.PLAYER, (px, y0), 9)
         self.draw_glow(hx, chase_y, 34, C.HUNTER, 0.6)
         pts = [(hx + math.cos(self.t * 3 + k * math.pi / 2) * 12,
                 chase_y + math.sin(self.t * 3 + k * math.pi / 2) * 12) for k in range(4)]
-        pygame.draw.polygon(scr, C.HUNTER, pts)
+        gfx.polygon(scr, C.HUNTER, pts)
 
         size = 92 if portrait else 132
         if size not in self.title_surfs:
             self.title_surfs[size] = self._title_surface(size)
         glow, text, pad = self.title_surfs[size]
         ty = 200 if portrait else 92
-        gx = cx - glow.get_width() // 2
-        scr.blit(glow, (gx, ty - pad), special_flags=pygame.BLEND_RGB_ADD)
-        scr.blit(text, (gx + pad, ty))
-        tag_y = ty + text.get_height() + (34 if portrait else 22)
+        gx = cx - gfx.logical_size(glow)[0] / 2
+        gfx.blit(scr, glow, (gx, ty - pad), special_flags=pygame.BLEND_RGB_ADD)
+        gfx.blit(scr, text, (gx + pad, ty))
+        tag_y = ty + gfx.logical_size(text)[1] + (34 if portrait else 22)
         self.blit_text("It learns how you move.", 32, C.MUTED, (cx, tag_y), "center")
 
         cards = (
@@ -869,8 +912,8 @@ class Renderer:
             positions = [(x0 + i * (cw + gap), 252) for i in range(3)]
         for (x, y), (num, head, l1, l2, col) in zip(positions, cards):
             self.card((x, y, cw, ch), None, col)
-            pygame.draw.circle(scr, scale(col, 0.2), (x + 34, y + 38), 17)
-            pygame.draw.circle(scr, col, (x + 34, y + 38), 17, 2)
+            gfx.circle(scr, scale(col, 0.2), (x + 34, y + 38), 17)
+            gfx.circle(scr, col, (x + 34, y + 38), 17, 2)
             self.blit_text(num, 26, col, (x + 34, y + 39), "center")
             self.blit_text(head, 24, C.TEXT, (x + 62, y + 30), spacing=3)
             if portrait:
@@ -889,8 +932,8 @@ class Renderer:
         for i, (kind, name, desc) in enumerate(items):
             col = POWER_COLORS[kind]
             ix, iy = rows[i] if rows else (x, 404)
-            pygame.draw.circle(scr, scale(col, 0.15), (ix + 12, iy), 13)
-            pygame.draw.circle(scr, col, (ix + 12, iy), 13, 2)
+            gfx.circle(scr, scale(col, 0.15), (ix + 12, iy), 13)
+            gfx.circle(scr, col, (ix + 12, iy), 13, 2)
             self.power_icon(ix + 12, iy, kind, col, r=7)
             r = self.blit_text(name, 19, col, (ix + 34, iy), "midleft", spacing=2)
             r2 = self.blit_text(desc, 19, C.MUTED, (r.right + 8, iy), "midleft")
@@ -921,8 +964,7 @@ class Renderer:
     # ================================================================= pause
     def draw_pause(self):
         self.buttons = []
-        self.shade.fill((4, 6, 12, 190))
-        self.screen.blit(self.shade, (0, 0))
+        self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 190))
         cx, cy = C.WIDTH // 2, C.HEIGHT // 2
         self.blit_text("PAUSED", 80, C.TEXT, (cx, cy - 40), "center", spacing=8)
         if C.TOUCH:
@@ -937,8 +979,7 @@ class Renderer:
                        new_type=False, types_found=0):
         self.draw_game(world, dt, best, muted)
         self.buttons = []
-        self.shade.fill((4, 6, 12, 215))
-        self.screen.blit(self.shade, (0, 0))
+        self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 215))
 
         scr = self.screen
         portrait = C.PORTRAIT
@@ -952,12 +993,12 @@ class Renderer:
             x, y = (C.WIDTH - w) // 2, (C.HEIGHT - h) // 2
             lx, lw, ly = x + 34, 400, y
             rx, rw, ry = x + 486, 380, y
-        pygame.draw.rect(scr, C.CARD_BG, (x, y, w, h), border_radius=20)
-        pygame.draw.rect(scr, C.CARD_EDGE, (x, y, w, h), width=1, border_radius=20)
+        gfx.rect(scr, C.CARD_BG, (x, y, w, h), border_radius=20)
+        gfx.rect(scr, C.CARD_EDGE, (x, y, w, h), width=1, border_radius=20)
         if portrait:
-            pygame.draw.line(scr, C.CARD_EDGE, (x + 40, y + 476), (x + w - 40, y + 476))
+            gfx.line(scr, C.CARD_EDGE, (x + 40, y + 476), (x + w - 40, y + 476))
         else:
-            pygame.draw.line(scr, C.CARD_EDGE, (x + 460, y + 28), (x + 460, y + h - 70))
+            gfx.line(scr, C.CARD_EDGE, (x + 460, y + 28), (x + 460, y + h - 70))
 
         # ---------------- how readable you were ----------------
         lcx = lx + lw // 2
@@ -978,8 +1019,8 @@ class Renderer:
             lines = self.wrap(f'"{quote}"', 21, lw - 36)[:2]
             qh = 18 + 24 * len(lines)
             qy = ly + 202
-            pygame.draw.rect(scr, scale(C.HUNTER, 0.12), (lx, qy, lw, qh), border_radius=12)
-            pygame.draw.rect(scr, scale(C.HUNTER, 0.6), (lx, qy, lw, qh), width=1, border_radius=12)
+            gfx.rect(scr, scale(C.HUNTER, 0.12), (lx, qy, lw, qh), border_radius=12)
+            gfx.rect(scr, scale(C.HUNTER, 0.6), (lx, qy, lw, qh), width=1, border_radius=12)
             for i, line in enumerate(lines):
                 self.blit_text(line, 21, C.TEXT, (lcx, qy + 21 + i * 24), "center")
             self.blit_text("- the hunter", 15, scale(C.HUNTER, 0.9), (lx + lw - 12, qy + qh + 4),
@@ -1007,8 +1048,8 @@ class Renderer:
                 a = r["accuracy"]
                 bh = max(3, int(hh * a))
                 col = accuracy_color(a) if i == len(runs) - 1 else scale(accuracy_color(a), 0.5)
-                pygame.draw.rect(scr, col, (bx + i * (bw + 6), hy + hh - bh, bw, bh), border_radius=4)
-        pygame.draw.line(scr, C.CARD_EDGE, (hx, hy + hh + 1), (hx + hw, hy + hh + 1))
+                gfx.rect(scr, col, (bx + i * (bw + 6), hy + hh - bh, bw, bh), border_radius=4)
+        gfx.line(scr, C.CARD_EDGE, (hx, hy + hh + 1), (hx + hw, hy + hh + 1))
 
         # ---------------- who you are ----------------
         rcx = rx + rw // 2
@@ -1027,7 +1068,7 @@ class Renderer:
         dx0 = rcx - (total * 18) // 2 + 9
         for i in range(total):
             filled = i < types_found
-            pygame.draw.circle(scr, tcol if filled else C.CARD_EDGE, (dx0 + i * 18, ry + 206), 5,
+            gfx.circle(scr, tcol if filled else C.CARD_EDGE, (dx0 + i * 18, ry + 206), 5,
                                0 if filled else 1)
         self.blit_text(f"{types_found} / {total} TYPES FOUND", 14, C.MUTED, (rcx, ry + 224), "center",
                        spacing=2)
