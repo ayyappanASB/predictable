@@ -680,7 +680,7 @@ class App:
             if self.world.phase == "over":
                 self.finish_run()
         elif self.state == "paused":
-            self.renderer.draw_game(self.world, 0.0, best, muted)
+            self.renderer.draw_paused_game(self.world, best, muted)
             self.renderer.draw_pause()
         elif self.state == "over":
             self.over_timer -= dt

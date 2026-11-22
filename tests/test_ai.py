@@ -1,7 +1,6 @@
 """Unit tests for the AI: A* search, greedy step and the Markov predictor."""
 
 import random
-from collections import deque
 
 import pytest
 

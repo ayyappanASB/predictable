@@ -93,6 +93,10 @@ class Renderer:
         self.buttons = []          # (rect, action) of touch buttons drawn this frame
         self.pressed_dirs = set()  # D-pad directions currently held (for highlighting)
         self.low_quality = False   # set by the app on slow devices
+        self.over_key = None       # which results card the cached background belongs to
+        self.over_bg = None        # cached frozen game + dimming behind the results card
+        self.pause_key = None      # which paused frame the cached pause background shows
+        self.pause_bg = None       # cached frozen game behind the pause menu
         self.guide_shown = None    # guide page drawn last frame (None = guide closed)
         self.guide_anim = 1.0      # 0 -> 1 slide-in progress after a page change
         self.guide_dir = 1         # +1 sliding forwards, -1 backwards
@@ -113,6 +117,8 @@ class Renderer:
         self.vignette = self._make_vignette()
         self.backdrop = self._make_backdrop()
         self.arena_ref = self.arena_surf = self.static = None
+        self.over_key = self.over_bg = None
+        self.pause_key = self.pause_bg = None
 
     # ================================================================ basics
     def font(self, size):
@@ -1623,9 +1629,9 @@ class Renderer:
         gfx.rect(self.screen, C.HUNTER, (qx, qy, qw, 26), width=2, border_radius=8)
         self.blit_text(q, 15, (20, 20, 30), (kx + kw / 2, qy + 13), "center")
         if side:
-            bx, by, bw = ax + aw / 2, ky + kh + 70, aw - 48
+            bx, by = ax + aw / 2, ky + kh + 70
         else:
-            bx, by, bw = kx + kw + (aw - kw - 24) / 2, ay + ah / 2 - 20, aw - kw - 72
+            bx, by = kx + kw + (aw - kw - 24) / 2, ay + ah / 2 - 20
         self.blit_text("YOUR PLAYER TYPE", 14, C.MUTED, (bx, by - 30), "center", spacing=2)
         self.blit_text("THE ZIGZAG GOBLIN", 20 if not side else 26, C.GOOD, (bx, by), "center", spacing=1)
         for i in range(8):
@@ -1637,11 +1643,27 @@ class Renderer:
         self.blit_text("3 / 8 TYPES FOUND", 14, C.MUTED, (bx, by + 58), "center", spacing=2)
 
     # ================================================================= pause
+    def draw_paused_game(self, world, best, muted):
+        """Draw the frozen, dimmed game behind the pause menu, reusing a cached copy while nothing changes.
+
+        Args:
+            world: the paused World.
+            best: best score so far (shown in the HUD).
+            muted: whether sound is off (the HUD shows it).
+        """
+        key = (id(world), world.score, world.level_no, self.vision, muted, self.screen.get_size())
+        if self.pause_key != key:
+            self.draw_game(world, 0.0, best, muted)
+            self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 225))
+            self.pause_bg = self.screen.copy()
+            self.pause_key = key
+        else:
+            self.screen.blit(self.pause_bg, (0, 0))
+
     def draw_pause(self):
         """Draw the pause overlay (RESUME / HOW TO PLAY / SUPPORT / QUIT buttons on touch screens)."""
         self.buttons = []
-        self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 225))
-        cx, cy = C.WIDTH // 2, C.HEIGHT // 2
+        cx, cy = C.WIDTH // 2, C.HEIGHT // 2               # (the dimming is part of the cached background)
         # a solid card keeps the menu readable over banners and effects underneath
         panel = (cx - 235, cy - 115, 470, 385) if C.TOUCH else (cx - 270, cy - 110, 540, 250)
         gfx.rect(self.screen, C.CARD_BG, panel, border_radius=22)
@@ -1674,9 +1696,18 @@ class Renderer:
             new_type: True if this run unlocked a new player type.
             types_found: number of player types unlocked so far.
         """
-        self.draw_game(world, dt, best, muted)
+        # The game behind the card is frozen, so draw it (and the dimming) once and reuse it:
+        # redrawing it every frame made this screen ~7x slower than gameplay in the browser.
+        key = (id(world), id(summary), self.screen.get_size())
+        if self.over_key != key:
+            self.draw_game(world, dt, best, muted)
+            self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 215))
+            self.over_bg = self.screen.copy()
+            self.over_key = key
+        else:
+            self.t += dt
+            self.screen.blit(self.over_bg, (0, 0))
         self.buttons = []
-        self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 215))
 
         scr = self.screen
         portrait = C.PORTRAIT
