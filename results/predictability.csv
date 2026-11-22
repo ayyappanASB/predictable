@@ -1,0 +1,5 @@
+player,accuracy_last_500,sd
+Random mover,0.314,0.019
+Straight-line mover,0.969,0.006
+Orb-seeker (A* paths),0.789,0.012
+Looping pattern,0.740,0.049

@@ -1,0 +1,6 @@
+brain,mean_survival_s,sd,mean_orbs,catch_rate_60s
+Random walk,43.6,21.6,36.2,0.50
+Greedy,35.3,22.0,26.7,0.63
+A*,32.4,22.6,25.0,0.73
+A* + Markov,27.2,18.4,21.1,0.87
+Mirror,39.3,23.4,30.5,0.53
