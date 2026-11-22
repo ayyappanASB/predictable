@@ -9,6 +9,8 @@ every run the game tells you how predictable you were:
 
 Built for the *Artificial Intelligence Principles* mini project (2026).
 
+**▶ Play it in your browser (desktop or phone): https://ayyappanasb.github.io/predictable/**
+
 ![gameplay](docs/screenshots/04_level4_play_vision.png)
 
 ---
