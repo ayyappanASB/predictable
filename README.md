@@ -27,6 +27,7 @@ Mirror: https://ayyappanasb.github.io/predictable/ (same build, hosted on GitHub
 | V | Toggle **AI Vision** (see what the hunters are thinking) |
 | P / Esc | Pause |
 | M | Sound on/off |
+| H (or the **ⓘ** button) | **How to play** guide: 7 illustrated pages, browse with ← / → or swipe |
 
 **On phones** the game picks a touch layout automatically:
 

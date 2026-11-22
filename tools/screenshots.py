@@ -108,6 +108,12 @@ def main():
     for _ in range(40):
         app.frame()
     shot(app, "01_title")
+    app.open_guide()                       # the "How to play" guide, page 4 (Surprise the AI)
+    app.guide_page = 3
+    for _ in range(20):
+        app.frame()
+    shot(app, "10_guide")
+    app.close_guide()
 
     app.start_run()
     run(app, 30)

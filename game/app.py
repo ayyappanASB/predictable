@@ -3,7 +3,7 @@
 States:  title -> play <-> paused -> over -> play ...
 
 Input works the same way on every device:
-  * keyboard (arrows / WASD, V, P, M, Space, Esc)
+  * keyboard (arrows / WASD, V, P, M, H, Space, Esc)
   * mouse or touch: swipe anywhere to steer, on-screen D-pad and buttons on phones
 """
 
@@ -14,7 +14,7 @@ import time
 import pygame
 
 from . import config as C
-from . import gfx, profile, storage
+from . import gfx, guide, profile, storage
 from .ai.predictor import MarkovPredictor
 from .audio import Audio
 from .render import Renderer
@@ -130,6 +130,8 @@ class App:
         self.predictor = MarkovPredictor(order=C.PREDICT_ORDER)
         self.world = None
         self.state = "title"
+        self.guide_page = None       # page of the "How to play" guide, None when it is closed
+        self.guide_swipe = None      # pointer position where a swipe on the guide started
         self.held = []               # keyboard directions held, most recent last
         self.pad = {}                # pointer id -> D-pad direction held
         self.swipes = {}             # pointer id -> last swipe anchor position
@@ -314,6 +316,49 @@ class App:
             self.to_title()
         elif action == "again":
             self.start_run()
+        elif action == "guide":
+            self.open_guide()
+        elif action == "guide_close":
+            self.close_guide()
+        elif action == "guide_next":
+            self.turn_guide(+1)
+        elif action == "guide_prev":
+            self.turn_guide(-1)
+        elif action.startswith("guide_page:"):
+            self.guide_page = int(action.split(":")[1])
+            self.audio.play("click")
+
+    # ------------------------------------------------------------ guide
+    def open_guide(self):
+        """Open the "How to play" guide on its first page (pausing the game if it is running)."""
+        if self.state == "play":
+            self.pause()
+        self.release_all()
+        self.guide_page = 0
+        self.guide_swipe = None
+        self.audio.play("click")
+
+    def close_guide(self):
+        """Close the guide and return to the screen underneath (the game stays paused)."""
+        self.guide_page = None
+        self.guide_swipe = None
+        self.renderer.guide_shown = None
+        self.audio.play("click")
+
+    def turn_guide(self, step):
+        """Go to the next or previous guide page; "next" on the last page closes the guide.
+
+        Args:
+            step: +1 for the next page, -1 for the previous one.
+        """
+        if self.guide_page is None:
+            return
+        page = self.guide_page + step
+        if page >= len(guide.PAGES):
+            self.close_guide()
+        elif page >= 0:
+            self.guide_page = page
+            self.audio.play("click")
 
     # ------------------------------------------------------------ pointers
     def pointer_down(self, pos, pid):
@@ -324,6 +369,12 @@ class App:
             pid: pointer id ("mouse" or a finger id).
         """
         action = self.renderer.button_at(pos)
+        if self.guide_page is not None:          # guide open: only its buttons and swipes count
+            if action:
+                self.do_action(action, pid)
+            else:
+                self.guide_swipe = pos
+            return
         if self.state == "over" and self.over_timer > 0:
             return
         if action:
@@ -348,6 +399,11 @@ class App:
             pos: (x, y) in logical pixels.
             pid: pointer id ("mouse" or a finger id).
         """
+        if self.guide_page is not None:          # swipe left/right to change guide pages
+            if self.guide_swipe is not None and abs(pos[0] - self.guide_swipe[0]) >= 60:
+                self.turn_guide(-1 if pos[0] > self.guide_swipe[0] else +1)
+                self.guide_swipe = None
+            return
         anchor = self.swipes.get(pid)
         if anchor is None or self.state != "play":
             return
@@ -365,6 +421,7 @@ class App:
         Args:
             pid: pointer id ("mouse" or a finger id).
         """
+        self.guide_swipe = None
         self.swipes.pop(pid, None)
         self.pad.pop(pid, None)
 
@@ -444,6 +501,17 @@ class App:
         """
         if key == pygame.K_m:
             self.audio.toggle()
+            return
+        if self.guide_page is not None:          # guide open: keys browse it
+            if key in (pygame.K_RIGHT, pygame.K_d) or key in START_KEYS:
+                self.turn_guide(+1)
+            elif key in (pygame.K_LEFT, pygame.K_a):
+                self.turn_guide(-1)
+            elif key in (pygame.K_ESCAPE, pygame.K_h, pygame.K_q):
+                self.close_guide()
+            return
+        if key == pygame.K_h or key == pygame.K_SLASH:
+            self.open_guide()
             return
         if key == pygame.K_v:
             self.renderer.vision = not self.renderer.vision
@@ -576,6 +644,8 @@ class App:
             self.renderer.draw_game_over(self.world, dt, self.summary, best, self.new_best,
                                          self.save["runs"], muted, self.new_type,
                                          len(self.save["types"]))
+        if self.guide_page is not None:
+            self.renderer.draw_guide(self.guide_page, dt)
         if self.debug_input:
             fps = getattr(self.clock, "get_fps", lambda: 0.0)()
             info = (f"fps {fps:.0f}  work {self.work_ms:.1f}ms  scale {gfx.SCALE:.2f}  layout {C.LAYOUT}  "

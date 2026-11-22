@@ -93,6 +93,9 @@ class Renderer:
         self.buttons = []          # (rect, action) of touch buttons drawn this frame
         self.pressed_dirs = set()  # D-pad directions currently held (for highlighting)
         self.low_quality = False   # set by the app on slow devices
+        self.guide_shown = None    # guide page drawn last frame (None = guide closed)
+        self.guide_anim = 1.0      # 0 -> 1 slide-in progress after a page change
+        self.guide_dir = 1         # +1 sliding forwards, -1 backwards
 
     def set_screen(self, screen):
         """Switch to a new screen surface (resolution change): rebuild every cached image.
@@ -1221,19 +1224,401 @@ class Renderer:
         self.blit_text(f"{C.AUTHOR}  ·  {C.STUDENT_ID}  ·  AI Principles Mini Project 2026", 16, C.DIM,
                        (cx, C.HEIGHT - 24), "center", spacing=1)
 
+        # info button: opens the "How to play" guide (new players get a gentle hint)
+        ir = 28 if portrait else 22
+        ix, iy = C.WIDTH - (30 + ir), (30 + ir) if portrait else (18 + ir)
+        if runs == 0:
+            blink = 0.6 + 0.4 * math.sin(self.t * 4)
+            self.blit_text("NEW HERE?  HOW TO PLAY", 16, scale(C.PLAYER, blink), (ix - ir - 14, iy),
+                           "midright", spacing=2)
+        self.info_icon(ix, iy, ir)
+
+    # ================================================================= guide
+    def info_icon(self, cx, cy, r=22, action="guide"):
+        """Draw the round "i" info button (a speech bubble) and register it as a button.
+
+        Args:
+            cx, cy: centre in logical pixels.
+            r: radius in logical pixels.
+            action: action sent to the app when it is tapped.
+        """
+        pulse = 0.5 + 0.5 * math.sin(self.t * 3)
+        self.draw_glow(cx, cy, r * 2.2, C.PLAYER, round(0.15 + 0.15 * pulse, 1))
+        gfx.circle(self.screen, C.CARD_BG, (cx, cy), r)
+        tail = [(cx + r * 0.45, cy + r * 0.8), (cx + r * 1.05, cy + r * 1.05), (cx + r * 0.85, cy + r * 0.45)]
+        gfx.polygon(self.screen, C.CARD_BG, tail)
+        gfx.lines(self.screen, C.PLAYER, False, [tail[0], tail[1], tail[2]], 2)
+        gfx.arc(self.screen, C.PLAYER, (cx - r, cy - r, 2 * r, 2 * r), -0.25, 2 * math.pi - 1.3, 2)
+        gfx.circle(self.screen, C.TEXT, (cx, cy - r * 0.42), max(2.0, r * 0.13))
+        gfx.rect(self.screen, C.TEXT, (cx - r * 0.1, cy - r * 0.18, r * 0.2, r * 0.68), border_radius=2)
+        self.buttons.append((pygame.Rect(cx - r - 6, cy - r - 6, 2 * r + 12, 2 * r + 12), action))
+
+    def guide_layout(self):
+        """Card, illustration, text and footer rectangles of the guide for the current layout.
+
+        Returns:
+            Dict of (x, y, w, h) tuples in logical pixels: "card", "art", plus "text_y",
+            "foot_y" and the text sizes for this layout.
+        """
+        if C.PORTRAIT:
+            card = (30, (C.HEIGHT - 840) // 2, C.WIDTH - 60, 840)
+            x, y, w, h = card
+            return {"card": card, "art": (x + 30, y + 86, w - 60, 400), "text_y": y + 530,
+                    "foot_y": y + h - 92, "title": 38, "body": 25, "line": 36}
+        w, h = 780, 520
+        card = ((C.WIDTH - w) // 2, (C.HEIGHT - h) // 2 - (8 if not C.TOUCH else 0), w, h)
+        x, y = card[0], card[1]
+        return {"card": card, "art": (x + 32, y + 70, w - 64, 200), "text_y": y + 290,
+                "foot_y": y + h - 78, "title": 32, "body": 21, "line": 29}
+
+    def draw_guide(self, page, dt):
+        """Draw the "How to play" guide on top of the current screen.
+
+        Replaces the registered buttons with the guide's own (close, back, next, page dots),
+        so taps only reach the guide while it is open.
+
+        Args:
+            page: index of the page to show (0 .. len(guide.PAGES) - 1).
+            dt: seconds since the last frame (for the slide-in animation).
+        """
+        from . import guide
+        self.buttons = []
+        if page != self.guide_shown:                   # page changed: start the slide animation
+            self.guide_dir = 1 if self.guide_shown is None or page > self.guide_shown else -1
+            self.guide_anim = 0.0 if self.guide_shown is not None else 0.4
+            self.guide_shown = page
+        self.guide_anim = min(1.0, self.guide_anim + dt * 5)
+        ease = 1 - (1 - self.guide_anim) ** 3
+        slide = (1 - ease) * 40 * self.guide_dir
+
+        n = len(guide.PAGES)
+        info = guide.PAGES[page]
+        lay = self.guide_layout()
+        x, y, w, h = lay["card"]
+        accent = info["accent"]
+        self.tint((0, 0, C.WIDTH, C.HEIGHT), (3, 5, 11, 215))
+        self.draw_glow(x + w / 2, y + 40, 260, accent, 0.1)
+        gfx.rect(self.screen, C.CARD_BG, lay["card"], border_radius=22)
+        gfx.rect(self.screen, C.CARD_EDGE, lay["card"], width=2, border_radius=22)
+        gfx.rect(self.screen, accent, (x + 28, y, 56, 4), border_radius=2)
+
+        # header: label, page counter, close button
+        self.blit_text("HOW TO PLAY", 17, C.MUTED, (x + 30, y + 30), spacing=3)
+        self.blit_text(f"{page + 1} / {n}", 17, accent, (x + 30 + 150, y + 30), spacing=2)
+        cr = 22 if not C.PORTRAIT else 26
+        ccx, ccy = x + w - 30 - cr, y + 24 + cr
+        gfx.circle(self.screen, C.ARENA_BG, (ccx, ccy), cr)
+        gfx.circle(self.screen, C.CARD_EDGE, (ccx, ccy), cr, 2)
+        k = cr * 0.36
+        gfx.line(self.screen, C.TEXT, (ccx - k, ccy - k), (ccx + k, ccy + k), 3)
+        gfx.line(self.screen, C.TEXT, (ccx - k, ccy + k), (ccx + k, ccy - k), 3)
+        self.buttons.append((pygame.Rect(ccx - cr - 6, ccy - cr - 6, 2 * cr + 12, 2 * cr + 12), "guide_close"))
+
+        # illustration + text (slide in when the page changes)
+        ax, ay, aw, ah = lay["art"]
+        gfx.rect(self.screen, C.ARENA_BG, (ax, ay, aw, ah), border_radius=16)
+        getattr(self, "_art_" + info["art"])(ax + slide, ay, aw, ah)
+        ty = lay["text_y"]
+        self.blit_text(info["title"], lay["title"], accent, (x + w / 2 + slide, ty), "center", spacing=3)
+        lines = self.wrap(info["body"], lay["body"], w - 90)
+        for i, line in enumerate(lines[:6]):
+            self.blit_text(line, lay["body"], C.TEXT if i == 0 else scale(C.TEXT, 0.82),
+                           (x + w / 2 + slide, ty + 46 + i * lay["line"]), "center")
+
+        # footer: back / dots / next
+        fy = lay["foot_y"]
+        bw, bh = (190, 64) if C.PORTRAIT else (150, 50)
+        if page > 0:
+            self.button((x + 30, fy, bw, bh), "guide_prev", "BACK")
+        last = page == n - 1
+        self.button((x + w - 30 - bw, fy, bw, bh), "guide_next", "GOT IT" if last else "NEXT", True,
+                    C.GOOD if last else C.PLAYER)
+        gap = 22 if C.PORTRAIT else 20
+        dx0 = x + w / 2 - gap * (n - 1) / 2
+        for i in range(n):
+            cx = dx0 + i * gap
+            if i == page:
+                gfx.rect(self.screen, accent, (cx - 9, fy + bh / 2 - 4, 18, 8), border_radius=4)
+            else:
+                gfx.circle(self.screen, C.CARD_EDGE, (cx, fy + bh / 2), 4)
+            self.buttons.append((pygame.Rect(cx - gap / 2, fy, gap, bh), f"guide_page:{i}"))
+        if not C.TOUCH:
+            self.blit_text("<  >  arrow keys to browse     ·     ESC to close", 16, C.DIM,
+                           (C.WIDTH // 2, y + h + 22), "center", spacing=1)
+
+    # --- guide illustrations (each draws inside the art box ax, ay, aw, ah) ---
+    def _art_label(self, text, x, y, color=None):
+        """Small caption under an illustration element.
+
+        Args:
+            text: the caption.
+            x, y: centre of the caption in logical pixels.
+            color: text colour; None uses the muted grey.
+        """
+        self.blit_text(text, 15, color or C.MUTED, (x, y), "center", spacing=2)
+
+    def _hunter(self, x, y, r=13, color=None):
+        """Draw a hunter diamond with a glow at (x, y) with radius `r` and optional `color`."""
+        color = color or C.HUNTER
+        self.draw_glow(x, y, r * 2.6, color, 0.5)
+        gfx.polygon(self.screen, color, [(x, y - r), (x + r, y), (x, y + r), (x - r, y)])
+        gfx.circle(self.screen, (255, 235, 245), (x, y), r * 0.3)
+
+    def _player(self, x, y, r=11):
+        """Draw the player light with a glow at (x, y) with radius `r`."""
+        self.draw_glow(x, y, r * 3.2, C.PLAYER, 0.6)
+        gfx.circle(self.screen, C.PLAYER, (x, y), r)
+        gfx.circle(self.screen, (225, 252, 255), (x, y), r * 0.45)
+
+    def _orb(self, x, y, r=8):
+        """Draw a green orb with a glow at (x, y) with radius `r`."""
+        self.draw_glow(x, y, r * 3.2, C.ORB, 0.6)
+        gfx.circle(self.screen, scale(C.ORB, 0.55), (x, y), r + 4, 2)
+        gfx.circle(self.screen, C.ORB, (x, y), r)
+
+    def _dots(self, a, b, color, n=9):
+        """Dotted line from point `a` to point `b` with `n` dots in `color`."""
+        for i in range(n + 1):
+            t = i / n
+            gfx.circle(self.screen, color, (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t), 2.5)
+
+    def _art_welcome(self, ax, ay, aw, ah):
+        """Illustration for page 1: the player heading for an orb with a hunter behind.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        cx, cy = ax + aw / 2, ay + ah / 2 - 10
+        for wx, wy, ww, wh in ((-180, -60, 120, 22), (60, 40, 140, 22), (-40, -40, 22, 70)):
+            gfx.rect(self.screen, C.WALL, (cx + wx, cy + wy, ww, wh), border_radius=7)
+        px, py = cx - 70, cy + 10
+        ox, oy = cx + 190, cy - 30
+        hx, hy = cx - 250, cy + 10
+        self._dots((px + 16, py), (ox - 18, oy + 4), C.PLAYER, 10)
+        self._dots((hx + 18, hy), (px - 18, py), C.HUNTER, 6)
+        self._player(px, py)
+        self._orb(ox, oy)
+        self._hunter(hx, hy)
+        self._art_label("HUNTER", hx, hy + 38, C.HUNTER)
+        self._art_label("YOU", px, py + 38, C.PLAYER)
+        self._art_label("ORB", ox, oy + 36, C.ORB)
+
+    def _keycap(self, x, y, s, direction=None, label=None):
+        """Draw a keyboard key of size `s` at top-left (x, y) with an arrow `direction` or a text `label`."""
+        gfx.rect(self.screen, C.CARD_EDGE, (x, y + 4, s, s), border_radius=10)
+        gfx.rect(self.screen, C.CARD_BG, (x, y, s, s), border_radius=10)
+        gfx.rect(self.screen, scale(C.PLAYER, 0.6), (x, y, s, s), width=2, border_radius=10)
+        if direction:
+            self.arrow((x + s / 2, y + s / 2), direction, s * 0.22, C.TEXT)
+        if label:
+            self.blit_text(label, 20, C.TEXT, (x + s / 2, y + s / 2), "center")
+
+    def _art_controls(self, ax, ay, aw, ah):
+        """Illustration for page 2: arrow keys, the phone swipe / D-pad and the shortcut keys.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        cx, cy = ax + aw / 2, ay + ah / 2
+        s = 50 if not C.PORTRAIT else 62
+        kx = cx - aw * 0.25
+        top = cy - s - 22 if not C.PORTRAIT else cy - s - 70
+        self._keycap(kx - s / 2, top, s, "U")
+        for i, d in enumerate("LDR"):
+            self._keycap(kx - s * 1.5 - 6 + i * (s + 6), top + s + 8, s, d)
+        self._art_label("ARROWS / WASD", kx, top + 2 * s + 34)
+        # phone with a swipe and a mini D-pad
+        phx = cx + aw * 0.25
+        pw, ph = (96, 150) if not C.PORTRAIT else (130, 210)
+        py0 = cy - ph / 2 - (10 if not C.PORTRAIT else 50)
+        gfx.rect(self.screen, (5, 7, 14), (phx - pw / 2, py0, pw, ph), border_radius=16)
+        gfx.rect(self.screen, C.CARD_EDGE, (phx - pw / 2, py0, pw, ph), width=2, border_radius=16)
+        sy = py0 + ph * 0.32
+        gfx.line(self.screen, C.PLAYER, (phx - pw * 0.3, sy), (phx + pw * 0.22, sy), 3)
+        self.arrow((phx + pw * 0.22, sy), "R", 8, C.PLAYER)
+        gfx.circle(self.screen, scale(C.TEXT, 0.9), (phx - pw * 0.3, sy), 7, 2)
+        dpy = py0 + ph * 0.7
+        for d, (ddx, ddy) in C.DIRS.items():
+            gfx.circle(self.screen, C.CARD_BG, (phx + ddx * 16, dpy + ddy * 16), 9)
+            gfx.circle(self.screen, C.CARD_EDGE, (phx + ddx * 16, dpy + ddy * 16), 9, 1)
+        self._art_label("SWIPE OR D-PAD", phx, py0 + ph + 22)
+        if C.PORTRAIT:                                  # room for the shortcut keys too
+            ky = ay + ah - 70
+            for i, (k, name) in enumerate((("V", "VISION"), ("P", "PAUSE"), ("M", "SOUND"), ("H", "GUIDE"))):
+                kx2 = cx - 187 + i * 110
+                self._keycap(kx2, ky, 44, label=k)
+                self._art_label(name, kx2 + 22, ky + 62)
+
+    def _art_levels(self, ax, ay, aw, ah):
+        """Illustration for page 3: the six hunters, getting smarter level by level.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        levels = (("WANDERER", C.GOOD), ("CHASER", C.ORB), ("TRACKER", C.PLAYER),
+                  ("MIND READER", C.CHAOS_C), ("THE PACK", C.HUNTER_2), ("THE MIRROR", C.MIRROR_C))
+        cols = 3 if C.PORTRAIT else 6
+        gap = 12
+        cw = (aw - 40 - gap * (cols - 1)) / cols
+        ch = 120 if C.PORTRAIT else 112
+        rows = math.ceil(len(levels) / cols)
+        y0 = ay + (ah - rows * ch - (rows - 1) * gap - 30) / 2
+        for i, (name, col) in enumerate(levels):
+            c, r = i % cols, i // cols
+            x = ax + 20 + c * (cw + gap)
+            y = y0 + r * (ch + gap)
+            gfx.rect(self.screen, C.CARD_BG, (x, y, cw, ch), border_radius=12)
+            gfx.rect(self.screen, scale(col, 0.7), (x, y, cw, ch), width=2, border_radius=12)
+            self.blit_text(str(i + 1), 30, col, (x + cw / 2, y + 28), "center")
+            self.blit_text(name, 15, C.TEXT, (x + cw / 2, y + 62), "center", spacing=1)
+            for p in range(6):
+                pc = col if p <= i else C.CARD_EDGE
+                gfx.rect(self.screen, pc, (x + cw / 2 - 39 + p * 13, y + ch - 26, 9, 9), border_radius=2)
+        ly = y0 + rows * ch + (rows - 1) * gap + 22
+        self._art_label("EASY  ------------------------------------>  SMART", ax + aw / 2, ly)
+
+    def _art_surprise(self, ax, ay, aw, ah):
+        """Illustration for page 4: the AI expects RIGHT, you go UP, and the CHAOS meter fills.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        side = C.PORTRAIT
+        jx = ax + aw * 0.36 if side else ax + aw * 0.22
+        jy = ay + (ah * 0.36 if side else ah / 2)
+        cell = 34
+        for sx in (-1, 1):                              # four wall blocks make a crossroads
+            for sy in (-1, 1):
+                gfx.rect(self.screen, C.WALL, (jx + sx * cell - cell * 0.6, jy + sy * cell - cell * 0.6,
+                                               cell * 1.2, cell * 1.2), border_radius=7)
+        self._dots((jx + 18, jy), (jx + 110, jy), C.HUNTER, 7)
+        self.arrow((jx + 118, jy), "R", 9, C.HUNTER)
+        self.blit_text("AI EXPECTS", 15, C.HUNTER, (jx + 134, jy - 9), "midleft", spacing=1)
+        self.blit_text("RIGHT (80%)", 15, C.HUNTER, (jx + 134, jy + 9), "midleft", spacing=1)
+        gfx.line(self.screen, C.PLAYER, (jx, jy - 18), (jx, jy - 78), 4)
+        self.arrow((jx, jy - 84), "U", 10, C.PLAYER)
+        self.blit_text("+25 SURPRISE!", 18, C.CHAOS_C, (jx - 20, jy - 92), "midright", spacing=1)
+        self._player(jx, jy, 10)
+        # chaos meter
+        if side:
+            bx, by, bw = ax + 60, ay + ah * 0.78, aw - 120
+        else:
+            bx, by, bw = ax + aw * 0.62, ay + ah / 2 - 10, aw * 0.33
+        self.blit_text("CHAOS", 16, C.MUTED, (bx, by - 24), spacing=3)
+        gfx.rect(self.screen, C.CARD_EDGE, (bx, by, bw, 12), border_radius=6)
+        fill = 0.55 + 0.4 * (0.5 + 0.5 * math.sin(self.t * 2))
+        gfx.rect(self.screen, C.CHAOS_C, (bx, by, bw * fill, 12), border_radius=6)
+        for i in range(1, 5):
+            gfx.line(self.screen, C.ARENA_BG, (bx + bw * i / 5, by), (bx + bw * i / 5, by + 12), 2)
+        self.blit_text("5 surprises = confused hunters", 16, C.MUTED, (bx, by + 26))
+        hx = bx + bw - 20
+        self._hunter(hx, by + 70, 11, C.HUNTER)
+        self.blit_text("?", 26, C.WARN, (hx + 18, by + 52), "center")
+
+    def _art_powerups(self, ax, ay, aw, ah):
+        """Illustration for page 5: the three power-ups with what they do.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        from .guide import POWERUPS
+        for i, (kind, name, desc) in enumerate(POWERUPS):
+            col = POWER_COLORS[kind]
+            cx = ax + aw * (i + 0.5) / 3
+            cy = ay + ah * 0.38
+            r = 38 if C.PORTRAIT else 32
+            self.draw_glow(cx, cy, r * 2.2, col, 0.4)
+            gfx.circle(self.screen, scale(col, 0.15), (cx, cy), r)
+            gfx.circle(self.screen, col, (cx, cy), r, 2)
+            self.power_icon(cx, cy, kind, col, r=r * 0.45)
+            self.blit_text(name, 20, col, (cx, cy + r + 26), "center", spacing=2)
+            self.blit_text(desc, 16, C.MUTED, (cx, cy + r + 52), "center")
+
+    def _art_vision(self, ax, ay, aw, ah):
+        """Illustration for page 6: the mind-model bars and the read-accuracy number.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        side = C.PORTRAIT
+        mx, my = (ax + 40, ay + 40) if side else (ax + 40, ay + 30)
+        mw = aw - 80 if side else aw * 0.5
+        self.blit_text("P(YOUR NEXT MOVE)", 15, C.MUTED, (mx, my), spacing=2)
+        vals = (("U", 0.12), ("R", 0.58), ("D", 0.27), ("L", 0.04))
+        top = max(v for _, v in vals)
+        for i, (d, v) in enumerate(vals):
+            y = my + 36 + i * (34 if side else 32)
+            col = C.PLAYER if v == top else scale(C.PLAYER, 0.5)
+            self.arrow((mx + 10, y), d, 8, col)
+            gfx.rect(self.screen, C.CARD_EDGE, (mx + 34, y - 5, mw - 110, 10), border_radius=5)
+            gfx.rect(self.screen, col, (mx + 34, y - 5, (mw - 110) * v, 10), border_radius=5)
+            self.blit_text(f"{v * 100:.0f}%", 16, col, (mx + mw - 30, y), "midright")
+        if side:
+            rx, ry = ax + aw / 2, ay + ah - 110
+        else:
+            rx, ry = ax + aw * 0.79, ay + ah / 2 - 20
+        self.blit_text("READ ACCURACY", 15, C.MUTED, (rx, ry - 44), "center", spacing=2)
+        self.blit_text("57%", 64, C.WARN, (rx, ry + 6), "center")
+        self.blit_text("lower = harder to read", 15, C.MUTED, (rx, ry + 52), "center")
+
+    def _art_caught(self, ax, ay, aw, ah):
+        """Illustration for page 7: a kill-cam caption and a player-type badge.
+
+        Args:
+            ax, ay: top-left of the illustration box in logical pixels.
+            aw, ah: width and height of the box.
+        """
+        side = C.PORTRAIT
+        kx, ky = ax + 24, ay + 24
+        kw = aw - 48 if side else aw * 0.56
+        kh = 160 if side else ah - 48
+        gfx.rect(self.screen, (8, 11, 22), (kx, ky, kw, kh), border_radius=12)
+        gfx.rect(self.screen, C.CARD_EDGE, (kx, ky, kw, kh), width=1, border_radius=12)
+        gfx.circle(self.screen, C.HUNTER, (kx + 20, ky + 22), 5)
+        self.blit_text("KILL CAM", 15, C.TEXT, (kx + 34, ky + 22), "midleft", spacing=3)
+        self.blit_text("IT SAW THIS COMING", 22, C.TEXT, (kx + kw / 2, ky + kh * 0.45), "center", spacing=2)
+        self.blit_text("4 MOVES AGO", 22, C.TEXT, (kx + kw / 2, ky + kh * 0.45 + 28), "center", spacing=2)
+        q = "\"You turned RIGHT after UP 6 times.\""
+        qw = self.text_size(q, 15)[0] + 24
+        qx, qy = kx + kw / 2 - qw / 2, ky + kh - 40
+        gfx.rect(self.screen, (245, 240, 250), (qx, qy, qw, 26), border_radius=8)
+        gfx.rect(self.screen, C.HUNTER, (qx, qy, qw, 26), width=2, border_radius=8)
+        self.blit_text(q, 15, (20, 20, 30), (kx + kw / 2, qy + 13), "center")
+        if side:
+            bx, by, bw = ax + aw / 2, ky + kh + 70, aw - 48
+        else:
+            bx, by, bw = kx + kw + (aw - kw - 24) / 2, ay + ah / 2 - 20, aw - kw - 72
+        self.blit_text("YOUR PLAYER TYPE", 14, C.MUTED, (bx, by - 30), "center", spacing=2)
+        self.blit_text("THE ZIGZAG GOBLIN", 20 if not side else 26, C.GOOD, (bx, by), "center", spacing=1)
+        for i in range(8):
+            px = bx - 7 * 9 + i * 18
+            if i < 3:
+                gfx.circle(self.screen, C.GOOD, (px, by + 34), 5)
+            else:
+                gfx.circle(self.screen, C.CARD_EDGE, (px, by + 34), 5, 1)
+        self.blit_text("3 / 8 TYPES FOUND", 14, C.MUTED, (bx, by + 58), "center", spacing=2)
+
     # ================================================================= pause
     def draw_pause(self):
-        """Draw the pause overlay (with RESUME / QUIT buttons on touch screens)."""
+        """Draw the pause overlay (RESUME / HOW TO PLAY / QUIT buttons on touch screens)."""
         self.buttons = []
         self.tint((0, 0, C.WIDTH, C.HEIGHT), (4, 6, 12, 190))
         cx, cy = C.WIDTH // 2, C.HEIGHT // 2
         self.blit_text("PAUSED", 80, C.TEXT, (cx, cy - 40), "center", spacing=8)
         if C.TOUCH:
             self.button((cx - 130, cy + 20, 260, 64), "resume", "RESUME", True)
-            self.button((cx - 130, cy + 100, 260, 64), "menu", "QUIT TO MENU", False, C.HUNTER)
+            self.button((cx - 130, cy + 100, 260, 64), "guide", "HOW TO PLAY")
+            self.button((cx - 130, cy + 180, 260, 64), "menu", "QUIT TO MENU", False, C.HUNTER)
         else:
-            self.blit_text("P / ESC to resume     ·     Q to quit to menu", 22, C.MUTED,
+            self.blit_text("P / ESC to resume     ·     Q to quit to menu     ·     H for help", 22, C.MUTED,
                            (cx, cy + 16), "center", spacing=1)
+            self.button((cx - 110, cy + 56, 220, 50), "guide", "HOW TO PLAY")
 
     # ============================================================= game over
     def draw_game_over(self, world, dt, summary, best, new_best, history, muted,
